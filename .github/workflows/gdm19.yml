@@ -25,6 +25,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: gdm19-results
+          if-no-files-found: error
           path: |
             experiments/gdm19/artifacts/gdm19.json
             experiments/gdm19/gdm19.log
