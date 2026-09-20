@@ -17,5 +17,5 @@ jobs:
           echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
       - name: Compose
         env:
-          APOLLO_TELEMETRY_DISABLED: "true"
+          APOLLO_TELEMETRY_DISABLED: "true"\n          APOLLO_ELV2_LICENSE: "accept"
         run: python experiments/gdm18/rover_smoke.py
