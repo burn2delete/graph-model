@@ -1,0 +1,29 @@
+name: GDM25 batched mmBERT cascade
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm25/**
+      - .github/workflows/gdm25.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm25
+          python batched_mmbert.py | tee gdm25.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm25-results
+          path: |
+            experiments/gdm25/artifacts/gdm25.json
+            experiments/gdm25/gdm25.log
+          if-no-files-found: error
