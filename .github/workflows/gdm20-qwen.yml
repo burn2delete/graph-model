@@ -1,0 +1,32 @@
+name: GDM20 GraphQL embedding
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm20/qwen_graphql_retrieval.py
+      - .github/workflows/gdm20-qwen.yml
+  workflow_dispatch: {}
+jobs:
+  retrieval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - name: Benchmark Qwen GraphQL retriever
+        env:
+          GDM20_QWEN: xthor/Qwen3-Embedding-0.6B-GraphQL
+        run: |
+          cd experiments/gdm20
+          python qwen_graphql_retrieval.py | tee qwen.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm20-qwen-graphql
+          path: |
+            experiments/gdm20/artifacts/qwen-graphql.json
+            experiments/gdm20/qwen.log
+          if-no-files-found: error
