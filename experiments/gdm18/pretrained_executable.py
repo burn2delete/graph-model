@@ -101,7 +101,7 @@ def rover_compose(field,cache):
  with tempfile.TemporaryDirectory() as d:
   Path(d,"products.graphql").write_text(schema(field))
   Path(d,"supergraph.yaml").write_text('federation_version: =2.11.3\nsubgraphs:\n  products:\n    routing_url: http://products\n    schema:\n      file: ./products.graphql\n')
-  p=subprocess.run(["rover","supergraph","compose","--config",str(Path(d,"supergraph.yaml"))],cwd=d,capture_output=True,text=True)
+  p=subprocess.run(["rover","supergraph","compose","--config",str(Path(d,"supergraph.yaml"))],capture_output=True,text=True)
   cache[field]=p.returncode==0
  return cache[field]
 
