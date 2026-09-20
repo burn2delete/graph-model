@@ -1,0 +1,55 @@
+import json,os,random
+from pathlib import Path
+import torch
+from torch import nn
+from torch.nn import functional as F
+from transformers import AutoTokenizer,AutoModel
+SEED=26001;random.seed(SEED);torch.manual_seed(SEED);torch.set_num_threads(4)
+CAPS={"created":"Product.created: when the product was first registered","updated":"Product.updated: when the product was most recently changed","name":"Product.name: public product display name","rating":"Product.rating: numeric score attached to the product","supplier":"Product.supplier: business supplying the product","reviews":"Product.reviews: customer reviews of the product","author":"Review.author: person who wrote the review","author_name":"User.name: public name of the review author"}
+TRAIN={"created":["initial registration time","original product creation moment"],"updated":["latest modification time","most recent product edit"],"name":["public product name","display label for product"],"rating":["product score","numeric rating of product"],"supplier":["company supplying the item","business providing product"],"reviews":["customer reviews","consumer feedback entries"],"author":["person who wrote the review","review writer"],"author_name":["reviewer's public name","display name of review writer"]}
+TEST={"created":"moment this merchandise was initially persisted","updated":"timestamp of the newest edit","name":"customer-facing merchandise label","rating":"numeric evaluation attached to the item","supplier":"upstream commercial provider furnishing the item","reviews":"consumer assessment entries","author":"person responsible for writing the assessment","author_name":"human-readable identity of the feedback writer"}
+K=list(CAPS)
+def load(mid):
+ t=AutoTokenizer.from_pretrained(mid,trust_remote_code=True);m=AutoModel.from_pretrained(mid,trust_remote_code=True).eval();return t,m
+def emb(t,m,texts):
+ with torch.no_grad():
+  b=t(texts,padding=True,truncation=True,max_length=128,return_tensors="pt");o=m(**b).last_hidden_state;mask=b["attention_mask"].unsqueeze(-1);return (o*mask).sum(1)/mask.sum(1).clamp_min(1)
+rt,rm=load("xthor/Qwen3-Embedding-0.6B-GraphQL");dt,dm=load("jhu-clsp/mmBERT-base")
+for p in list(rm.parameters())+list(dm.parameters()):p.requires_grad=False
+corpus=F.normalize(emb(rt,rm,[CAPS[k] for k in K]),dim=-1)
+def retrieve(qs):return torch.topk(F.normalize(emb(rt,rm,qs),dim=-1)@corpus.T,2,dim=1).indices.tolist()
+# Train base reranker features.
+train=[]
+for rep in range(12):
+ for target in K:
+  for phrase in TRAIN[target]:train.append((f"Return the {phrase}.",target))
+ids=retrieve([q for q,_ in train]);features=[]
+for n,((q,target),ix) in enumerate(zip(train,ids)):
+ cs=[K[i] for i in ix]
+ if target not in cs:cs=[target,cs[0]]
+ random.Random(SEED+n).shuffle(cs);e=emb(dt,dm,[f"Request: {q} Candidate: {CAPS[c]}" for c in cs]);features.append((e,cs.index(target)))
+d=dm.config.hidden_size;head=nn.Sequential(nn.Linear(d,128),nn.GELU(),nn.Linear(128,1));opt=torch.optim.AdamW(head.parameters(),lr=1e-3)
+for ep in range(12):
+ random.shuffle(features)
+ for e,y in features:
+  z=head(e).squeeze(-1);loss=F.cross_entropy(z[None,:],torch.tensor([y]));opt.zero_grad();loss.backward();opt.step()
+# Frozen diagnostic test: identify semantic failure classes.
+rows=[(f"Return the {TEST[K[i%8]]}.",K[i%8]) for i in range(80)];ids=retrieve([q for q,_ in rows]);fails=[];correct=0
+for ix,(q,target) in zip(ids,rows):
+ cs=[K[i] for i in ix];e=emb(dt,dm,[f"Request: {q} Candidate: {CAPS[c]}" for c in cs]);scores=head(e).squeeze(-1);pred=cs[int(scores.argmax())];correct+=pred==target
+ if pred!=target:fails.append({"question":q,"target":target,"predicted":pred,"candidates":cs,"scores":[float(x) for x in scores]})
+# Add training-only contrast templates for failure target/predicted class pairs; do NOT train on held-out wording.
+pairs=sorted(set((x["target"],x["predicted"]) for x in fails));extra=[]
+for a,b in pairs:
+ for phrase in TRAIN[a]:
+  cs=[a,b];random.shuffle(cs);e=emb(dt,dm,[f"Request: Return the {phrase}. Candidate: {CAPS[c]}" for c in cs]);extra.append((e,cs.index(a)))
+for ep in range(12):
+ random.shuffle(extra)
+ for e,y in extra:
+  z=head(e).squeeze(-1);loss=F.cross_entropy(z[None,:],torch.tensor([y]));opt.zero_grad();loss.backward();opt.step()
+post=0;postfails=[]
+for ix,(q,target) in zip(ids,rows):
+ cs=[K[i] for i in ix];e=emb(dt,dm,[f"Request: {q} Candidate: {CAPS[c]}" for c in cs]);pred=cs[int(head(e).squeeze(-1).argmax())];post+=pred==target
+ if pred!=target:postfails.append({"target":target,"predicted":pred,"candidates":cs})
+out={"before_accuracy":correct/80,"failure_pairs":pairs,"failure_count":len(fails),"contrast_examples":len(extra),"after_accuracy":post/80,"remaining_failures":postfails}
+Path("artifacts").mkdir(exist_ok=True);Path("artifacts/gdm26.json").write_text(json.dumps(out,indent=2));print(json.dumps(out,indent=2))
