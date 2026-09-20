@@ -1,4 +1,4 @@
-import json, os, re, random, time
+import json, os, re, random, time, resource
 from pathlib import Path
 import torch
 from torch import nn
@@ -37,7 +37,7 @@ def eval(m,rs):
  t=time.perf_counter();c=0
  for x in rs:
   e=m.embed(x,False);p=x["ops"][int(m.head(e).squeeze(-1).argmax())][0];c+=p==x["target"]
- return {"correct":c,"worlds":len(rs),"seconds":time.perf_counter()-t}
+ elapsed=time.perf_counter()-t\n return {"correct":c,"worlds":len(rs),"seconds":elapsed,"ms_per_world":1000*elapsed/len(rs),"worlds_per_second":len(rs)/elapsed,"max_rss_kb":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
 def main():
  tr=rows("train",80,0);test=rows("test",80,2000)
  models=json.loads(os.environ["GDM20_MODELS"]);out=[]
