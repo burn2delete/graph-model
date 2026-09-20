@@ -1,0 +1,29 @@
+name: GDM28 typed options
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm28/**
+      - .github/workflows/gdm28.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm28
+          python typed_options.py | tee gdm28.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm28-results
+          path: |
+            experiments/gdm28/artifacts/gdm28.json
+            experiments/gdm28/gdm28.log
+          if-no-files-found: error
