@@ -48,7 +48,7 @@ class Semantic(nn.Module):
   return e
 
 class RandomSemantic(nn.Module):
- def __init__(self,d=192):
+ def __init__(self,d=256):
   super().__init__();self.proj=nn.Linear(256,d);self.choice=nn.Linear(d,1);self.support=nn.Linear(d,1)
  def embed(self,q,ops,grad):
   xs=[]
