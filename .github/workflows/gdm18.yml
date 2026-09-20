@@ -1,0 +1,36 @@
+name: GDM18 integrity gate
+on:
+  push:
+    branches: [experiment/gdm17-graphql]
+    paths:
+      - experiments/gdm18/**
+      - .github/workflows/gdm18.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run shortcut audit and executable pipeline
+        run: python experiments/gdm18/integrity_and_execution.py | tee gdm18.log
+      - name: Install Rover
+        continue-on-error: true
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/latest | sh
+          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+      - name: Record Rover availability
+        run: |
+          mkdir -p experiments/gdm18/artifacts
+          if command -v rover >/dev/null 2>&1; then rover --version | tee experiments/gdm18/artifacts/rover-version.txt; else echo "unavailable" | tee experiments/gdm18/artifacts/rover-version.txt; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm18-integrity
+          path: |
+            experiments/gdm18/artifacts
+            gdm18.log
+          if-no-files-found: error
