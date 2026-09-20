@@ -42,3 +42,5 @@ jobs:
             experiments/gdm20/artifacts/gdm20.json
             experiments/gdm20/${{ matrix.name }}.log
           if-no-files-found: error
+
+# rerun-speed: 1
