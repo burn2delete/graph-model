@@ -1,0 +1,30 @@
+name: GDM19 semantic contrasts
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm19/**
+      - .github/workflows/gdm19.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - name: Compare random, frozen pretrained, and fine-tuned pretrained
+        env: {GDM19_MODEL: distilbert-base-uncased}
+        run: |
+          cd experiments/gdm19
+          python semantic_contrasts.py | tee gdm19.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm19-results
+          path: |
+            experiments/gdm19/artifacts/gdm19.json
+            experiments/gdm19/gdm19.log
