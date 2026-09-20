@@ -1,0 +1,33 @@
+name: GDM21 retrieval decision cascade
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm21/cascade.py
+      - .github/workflows/gdm21.yml
+  workflow_dispatch: {}
+jobs:
+  cascade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - name: Run retrieval-decision cascade
+        env:
+          GDM21_RETRIEVER: xthor/Qwen3-Embedding-0.6B-GraphQL
+          GDM21_DECIDER: answerdotai/ModernBERT-base
+        run: |
+          cd experiments/gdm21
+          python cascade.py | tee gdm21.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm21-results
+          path: |
+            experiments/gdm21/artifacts/gdm21.json
+            experiments/gdm21/gdm21.log
+          if-no-files-found: error
