@@ -1,0 +1,29 @@
+name: GDM23 fine-tuned reranker
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm23/**
+      - .github/workflows/gdm23.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm23
+          python finetuned_reranker.py | tee gdm23.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm23-results
+          path: |
+            experiments/gdm23/artifacts/gdm23.json
+            experiments/gdm23/gdm23.log
+          if-no-files-found: error
