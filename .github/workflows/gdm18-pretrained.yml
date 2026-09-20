@@ -1,0 +1,41 @@
+name: GDM18 pretrained executable
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm18/pretrained_executable.py
+      - .github/workflows/gdm18-pretrained.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Rover
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/latest | sh
+          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+      - name: Install ML dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - name: Run pretrained executable benchmark
+        env:
+          GDM18_PRETRAINED: distilbert-base-uncased
+          APOLLO_TELEMETRY_DISABLED: "true"
+        run: |
+          cd experiments/gdm18
+          python pretrained_executable.py | tee pretrained.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm18-pretrained
+          path: |
+            experiments/gdm18/artifacts/gdm18-pretrained.json
+            experiments/gdm18/pretrained.log
+          if-no-files-found: error
