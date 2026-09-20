@@ -6,7 +6,7 @@ type Product @key(fields: "id") { id: ID! created: String! }
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d);(p/"products.graphql").write_text(s)
- (p/"supergraph.yaml").write_text('federation_version: =2.0\nsubgraphs:\n  products:\n    routing_url: http://products/graphql\n    schema:\n      file: products.graphql\n')
- print("CONFIG");print((p/"supergraph.yaml").read_text());print("SDL");print((p/"products.graphql").read_text())
+ (p/"supergraph.yaml").write_text('subgraphs:\n  products:\n    routing_url: http://products/graphql\n    schema:\n      file: products.graphql\nfederation_version: =2.11.0\n')
+ print((p/"supergraph.yaml").read_text())
  r=subprocess.run(["rover","supergraph","compose","--config","supergraph.yaml"],cwd=d,capture_output=True,text=True)
  print("returncode",r.returncode);print("STDOUT",r.stdout);print("STDERR",r.stderr)
