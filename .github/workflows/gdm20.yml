@@ -1,0 +1,44 @@
+name: GDM20 encoder bakeoff
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm20/**
+      - .github/workflows/gdm20.yml
+  workflow_dispatch: {}
+jobs:
+  bakeoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: distilbert
+            id: distilbert-base-uncased
+          - name: modernbert
+            id: answerdotai/ModernBERT-base
+          - name: mmbert
+            id: jhu-clsp/mmBERT-base
+          - name: neobert
+            id: chandar-lab/NeoBERT
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - name: Run encoder arm
+        env:
+          GDM20_MODELS: '[{"name":"${{ matrix.name }}","id":"${{ matrix.id }}","finetune":true}]'
+        run: |
+          cd experiments/gdm20
+          python encoder_bakeoff.py | tee ${{ matrix.name }}.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm20-${{ matrix.name }}
+          path: |
+            experiments/gdm20/artifacts/gdm20.json
+            experiments/gdm20/${{ matrix.name }}.log
+          if-no-files-found: error
