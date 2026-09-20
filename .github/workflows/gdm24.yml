@@ -1,0 +1,29 @@
+name: GDM24 mmBERT reranker
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm24/**
+      - .github/workflows/gdm24.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm24
+          python mmbert_reranker.py | tee gdm24.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm24-results
+          path: |
+            experiments/gdm24/artifacts/gdm24.json
+            experiments/gdm24/gdm24.log
+          if-no-files-found: error
