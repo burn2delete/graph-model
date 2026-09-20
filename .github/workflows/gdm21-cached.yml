@@ -1,0 +1,29 @@
+name: GDM21 cached cascade
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm21/cached_cascade.py
+      - .github/workflows/gdm21-cached.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm21
+          python cached_cascade.py | tee cached.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm21-cached
+          path: |
+            experiments/gdm21/artifacts/gdm21-cached.json
+            experiments/gdm21/cached.log
+          if-no-files-found: error
