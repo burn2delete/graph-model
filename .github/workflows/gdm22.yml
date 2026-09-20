@@ -1,0 +1,29 @@
+name: GDM22 hard-negative reranker
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm22/**
+      - .github/workflows/gdm22.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm22
+          python hard_negative_reranker.py | tee gdm22.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm22-results
+          path: |
+            experiments/gdm22/artifacts/gdm22.json
+            experiments/gdm22/gdm22.log
+          if-no-files-found: error
