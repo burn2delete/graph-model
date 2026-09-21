@@ -19,6 +19,53 @@ REGISTRY = {'distilbert': 'distilbert/distilbert-base-uncased',
             'qwen': 'xthor/Qwen3-Embedding-0.6B-GraphQL'}
 
 
+def install_neobert_cpu_xformers_shim():
+    """Install the exact eager PyTorch ops NeoBERT needs on CPU.
+
+    NeoBERT's pinned remote code imports ``xformers.ops.SwiGLU`` and
+    ``memory_efficient_attention`` unconditionally. Published xformers wheels are
+    CUDA-oriented and fail to import on GitHub's CPU runners before xformers can
+    reach its own eager fallback. This shim preserves the same parameter names
+    and eager equations used by xformers while avoiding any CUDA extension.
+    """
+    import sys
+    import types
+
+    if 'xformers.ops' in sys.modules:
+        return
+
+    class SwiGLU(nn.Module):
+        def __init__(self, in_features, hidden_features, out_features=None, bias=True, **_):
+            super().__init__()
+            out_features = out_features or in_features
+            hidden_features = hidden_features or in_features
+            self.w12 = nn.Linear(in_features, 2 * hidden_features, bias=bias)
+            self.w3 = nn.Linear(hidden_features, out_features, bias=bias)
+            self.hidden_features = hidden_features
+            self.out_features = out_features
+            self.in_features = in_features
+
+        def forward(self, x):
+            x1, x2 = self.w12(x).chunk(2, dim=-1)
+            return self.w3(F.silu(x1) * x2)
+
+    def memory_efficient_attention(query, key, value, attn_bias=None, p=0.0, scale=None, **_):
+        # xformers accepts [B, M, H, K]; PyTorch SDPA accepts [B, H, M, K].
+        result = F.scaled_dot_product_attention(
+            query.transpose(1, 2), key.transpose(1, 2), value.transpose(1, 2),
+            attn_mask=attn_bias, dropout_p=p, scale=scale,
+        )
+        return result.transpose(1, 2)
+
+    ops = types.ModuleType('xformers.ops')
+    ops.SwiGLU = SwiGLU
+    ops.memory_efficient_attention = memory_efficient_attention
+    package = types.ModuleType('xformers')
+    package.ops = ops
+    sys.modules['xformers'] = package
+    sys.modules['xformers.ops'] = ops
+
+
 class Encoder:
     def __init__(self, name, revision=None):
         self.name = name; self.calls = 0; self.texts = 0; self.cache = {}
@@ -28,6 +75,8 @@ class Encoder:
                          'parameters': 0, 'role': 'unit-test/control only'}
             return
         from huggingface_hub import HfApi
+        if name == 'neobert':
+            install_neobert_cpu_xformers_shim()
         from transformers import AutoModel, AutoTokenizer
         model_id = REGISTRY[name]
         revision = revision or HfApi().model_info(model_id).sha
@@ -48,7 +97,8 @@ class Encoder:
                      'parameters': sum(p.numel() for p in self.model.parameters()),
                      'pooling': 'last-token' if name == 'qwen' else ('cls' if name == 'neobert' else 'mean'),
                      'dtype': 'float32', 'device': 'cpu', 'max_tokens': 256,
-                     'frozen': True, 'remote_code_pinned': remote}
+                     'frozen': True, 'remote_code_pinned': remote,
+                     'cpu_compatibility': 'pytorch-eager-xformers-equivalent' if name == 'neobert' else None}
 
     def encode(self, texts, cached=True, batch_size=8):
         texts = list(texts)
