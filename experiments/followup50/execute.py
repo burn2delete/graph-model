@@ -1,16 +1,16 @@
-"""Canonical GDM50 entrypoint with corrected online timing semantics.
+"""Canonical GDM50 entrypoint with corrected online timing and deterministic CPU training.
 
 GDM50's original explicit-NONE path called ``features_with_none(..., online=True)``
-for timing.  The implementation used ``cached=not online`` for both the request
-and the catalog option embeddings, so timed requests re-encoded every catalog
-option (and the fixed NONE text) even though the recorded latency scope claimed
-cached catalog vectors.  That made the explicit-NONE latency incomparable with
-the listwise control and violated experiments/MEASUREMENT_POLICY.md.
+for timing. The implementation used ``cached=not online`` for both the request and
+catalog option embeddings, so timed requests re-encoded every catalog option even
+though the recorded latency scope claimed cached catalog vectors.
 
-This entrypoint changes only that cache boundary: online requests always freshly
-encode the request clause, while catalog/NONE embeddings remain cached.  Model
-training, checkpoints, predictions, GraphQL execution, Rover composition and all
-correctness metrics continue to use the existing measured GDM50 implementation.
+The first cache-corrected rerun then exposed a second measurement problem: identical
+seeds, model revision, packages, dataset hashes and initial checkpoint hashes could
+produce materially different selected checkpoints on the two-thread CPU path. Tiny
+floating-point differences accumulated during training and changed checkpoint and
+threshold selection. This canonical entrypoint therefore fixes the cache boundary and
+forces single-thread deterministic PyTorch execution before delegating to GDM50.
 """
 from __future__ import annotations
 
@@ -21,12 +21,7 @@ from experiments.followup50 import run as g50
 
 
 def features_with_none_cached(encoder, item, clause, online=False):
-    """Build GDM50 features with fresh online query encoding and cached catalog.
-
-    ``online=True`` means only the request clause is freshly encoded.  Catalog
-    capability vectors and the fixed NONE vector are immutable for a catalog and
-    therefore belong to the cached-index side of the latency contract.
-    """
+    """Freshly encode only the online request clause; keep catalog/NONE cached."""
     real = item["catalog"]["options"]
     q = encoder.query(clause, cached=not online)
     texts = [option_text(o, True) for o in real] + [g50.NONE_TEXT]
@@ -42,17 +37,14 @@ def features_with_none_cached(encoder, item, clause, online=False):
             float(o["path"][-1] in {"name", "id"}),
         ])
     state.append([0.0, float(item["task"] == "schema"), 0.0, 0.0])
-    x = torch.cat(
-        [
-            qx,
-            c,
-            qx * c,
-            (qx - c).abs(),
-            centered,
-            torch.tensor(state, dtype=torch.float32),
-        ],
-        dim=-1,
-    )
+    x = torch.cat([
+        qx,
+        c,
+        qx * c,
+        (qx - c).abs(),
+        centered,
+        torch.tensor(state, dtype=torch.float32),
+    ], dim=-1)
     opts = real + [{
         "id": g50.NONE_ID,
         "path": [],
@@ -64,11 +56,21 @@ def features_with_none_cached(encoder, item, clause, online=False):
 
 
 def main():
-    # GDM50 helpers resolve ``features_with_none`` from their module globals at
-    # call time, so this repairs training/evaluation/timing consistently without
-    # rewriting historical source.  Only the cache policy differs from run 1.
     g50.features_with_none = features_with_none_cached
-    g50.main()
+    torch.use_deterministic_algorithms(True)
+
+    # ``g50.main`` historically requests two intra-op threads. Multithreaded CPU
+    # reductions were the only remaining changing execution condition between
+    # identical seeded runs. Preserve the public entrypoint while forcing one
+    # intra-op thread for this repaired execution path.
+    original_set_num_threads = torch.set_num_threads
+    def deterministic_set_num_threads(_requested):
+        original_set_num_threads(1)
+    torch.set_num_threads = deterministic_set_num_threads
+    try:
+        g50.main()
+    finally:
+        torch.set_num_threads = original_set_num_threads
 
 
 if __name__ == "__main__":
