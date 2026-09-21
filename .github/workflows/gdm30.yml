@@ -1,0 +1,29 @@
+name: GDM30 structured curriculum
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm30/**
+      - .github/workflows/gdm30.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm30
+          python structured_curriculum.py | tee gdm30.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm30-results
+          path: |
+            experiments/gdm30/artifacts/gdm30.json
+            experiments/gdm30/gdm30.log
+          if-no-files-found: error
