@@ -1,0 +1,39 @@
+name: GDM36 schema operation generation
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm36/**
+      - .github/workflows/gdm36.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Generate schemas and operations
+        run: |
+          cd experiments/gdm36
+          python schema_operation.py | tee gdm36.log
+      - name: Install Rover
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/latest | sh
+          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+      - name: Compose generated single-subgraph cases
+        env:
+          APOLLO_ELV2_LICENSE: "accept"
+          APOLLO_TELEMETRY_DISABLED: "true"
+        run: |
+          rover --version
+          for f in experiments/gdm36/artifacts/*-products.graphql; do
+            test -s "$f"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm36-results
+          path: |
+            experiments/gdm36/artifacts
+            experiments/gdm36/gdm36.log
+          if-no-files-found: error
