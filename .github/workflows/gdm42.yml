@@ -1,0 +1,58 @@
+name: GDM42 corrected parallel batch
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm42/**
+      - .github/workflows/gdm42.yml
+  workflow_dispatch: {}
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm42
+          python contracts.py | tee gdm42.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm42-contracts
+          path: |
+            experiments/gdm42/artifacts
+            experiments/gdm42/gdm42.log
+  backbone-grid:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [operation, schema]
+        architecture: [state, retrieval, pairwise, adapter]
+        backbone: [distilbert, modernbert, mmbert, neobert]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"task":"%s","architecture":"%s","backbone":"%s","stage":"queued-for-trained-benchmark"}\n' "${{ matrix.task }}" "${{ matrix.architecture }}" "${{ matrix.backbone }}" > results/result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm42-${{ matrix.task }}-${{ matrix.architecture }}-${{ matrix.backbone }}
+          path: results
+  retrieval-grid:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [operation, schema]
+        k: [1, 2, 4, 8]
+        reranker: [none, mmbert, modernbert]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"task":"%s","retriever":"qwen-graphql","k":%s,"reranker":"%s","stage":"queued-for-trained-benchmark"}\n' "${{ matrix.task }}" "${{ matrix.k }}" "${{ matrix.reranker }}" > results/result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm42-retrieval-${{ matrix.task }}-k${{ matrix.k }}-${{ matrix.reranker }}
+          path: results
