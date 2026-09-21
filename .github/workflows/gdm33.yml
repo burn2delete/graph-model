@@ -1,0 +1,25 @@
+name: GDM33 graph IR
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm33/**
+      - .github/workflows/gdm33.yml
+  workflow_dispatch: {}
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm33
+          python graph_ir.py | tee gdm33.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm33-graph-ir
+          path: |
+            experiments/gdm33/artifacts
+            experiments/gdm33/gdm33.log
+          if-no-files-found: error
