@@ -1,0 +1,25 @@
+name: GDM38 operation execution
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm38/**
+      - .github/workflows/gdm38.yml
+  workflow_dispatch: {}
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm38
+          python operation_execution.py | tee gdm38.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm38-results
+          path: |
+            experiments/gdm38/artifacts
+            experiments/gdm38/gdm38.log
+          if-no-files-found: error
