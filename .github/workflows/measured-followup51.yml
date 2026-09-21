@@ -1,0 +1,152 @@
+name: GDM51 explicit-NONE plus ambiguity discriminator
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/followup51/**
+      - .github/workflows/measured-followup51.yml
+  workflow_dispatch:
+    inputs:
+      seeds:
+        default: '5101,5102'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm51-measured
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  APOLLO_ELV2_LICENSE: accept
+  APOLLO_TELEMETRY_DISABLED: 'true'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '2'
+  MKL_NUM_THREADS: '2'
+  PYTHONUNBUFFERED: '1'
+  SEEDS: ${{ inputs.seeds || '5101,5102' }}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Compile and test GDM51 contracts and GDM50 cache boundary
+        run: |
+          set -euo pipefail
+          python -m compileall -q experiments/followup51
+          python -m unittest experiments.followup51.test_followup experiments.followup50.test_cache_repair -v 2>&1 | tee artifacts/tests.log
+      - name: Train and independently verify ambiguity-discriminator smoke policy
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup51.run --backbone hash --task operation --arms ambiguity-linear --seeds 5101 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
+          python - <<'PY'
+          from pathlib import Path
+          from experiments.followup51.collect import verify_summary
+          summaries=list(Path('artifacts/smoke').rglob('summary.json'))
+          assert len(summaries)==1, summaries
+          verify_summary(summaries[0])
+          print('gdm51 smoke evidence verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm51-preflight-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+  experiments:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        task: [operation, schema]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: gdm51-hf-${{ runner.os }}-distilbert-v1
+      - name: Install CPU model dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip freeze > artifacts/packages.txt
+      - name: Train explicit-NONE controls and ambiguity discriminators, execute GraphQL, compose schemas, and measure
+        env:
+          TASK: ${{ matrix.task }}
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup51.run --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          test -s artifacts/results/worker.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm51-worker-${{ github.run_id }}-${{ matrix.task }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3
+  verify-batch:
+    needs: [preflight, experiments]
+    if: always() && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm51-worker-${{ github.run_id }}-*
+          path: collected
+      - name: Independently verify GDM51 evidence and reproduce metrics
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m experiments.followup51.collect collected --seeds "$SEEDS" 2>&1 | tee collection.log
+          test -s collected/BATCH_REPORT.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm51-batch-report-${{ github.run_id }}
+          path: |
+            collected/BATCH_REPORT.json
+            collection.log
+          if-no-files-found: error
+          retention-days: 14
