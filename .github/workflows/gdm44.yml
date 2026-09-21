@@ -1,0 +1,41 @@
+name: GDM44 sharing ablation
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm44/**
+      - .github/workflows/gdm44.yml
+  workflow_dispatch: {}
+jobs:
+  ablation-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm44
+          python sharing_ablation.py | tee gdm44.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm44-ablation
+          path: |
+            experiments/gdm44/artifacts
+            experiments/gdm44/gdm44.log
+  sharing-grid:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [shared-policy, shared-heads, separate-adapters, separate-checkpoints]
+        backbone: [mmbert, modernbert]
+        retrieval: [none, qwen-top2]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"mode":"%s","backbone":"%s","retrieval":"%s","operation_arch":"terminal-path","schema_arch":"capability-set","metrics":["operation_quality","schema_quality","p50","p95","memory"]}\n' "${{ matrix.mode }}" "${{ matrix.backbone }}" "${{ matrix.retrieval }}" > results/result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm44-${{ matrix.mode }}-${{ matrix.backbone }}-${{ matrix.retrieval }}
+          path: results
