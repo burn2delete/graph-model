@@ -1,16 +1,18 @@
-"""Canonical GDM50 entrypoint with corrected online timing and deterministic CPU training.
+"""Canonical GDM50 entrypoint with corrected timing and cross-run CPU reproducibility.
 
 GDM50's original explicit-NONE path called ``features_with_none(..., online=True)``
 for timing. The implementation used ``cached=not online`` for both the request and
 catalog option embeddings, so timed requests re-encoded every catalog option even
 though the recorded latency scope claimed cached catalog vectors.
 
-The first cache-corrected rerun then exposed a second measurement problem: identical
+The first cache-corrected rerun exposed a second measurement problem: identical
 seeds, model revision, packages, dataset hashes and initial checkpoint hashes could
-produce materially different selected checkpoints on the two-thread CPU path. Tiny
-floating-point differences accumulated during training and changed checkpoint and
-threshold selection. This canonical entrypoint therefore fixes the cache boundary and
-forces single-thread deterministic PyTorch execution before delegating to GDM50.
+produce materially different selected checkpoints on the multi-thread CPU path.
+Forcing one PyTorch intra-op thread made operation runs bit-reproducible, but an
+Actions-only same-seed rerun still exposed tiny frozen-encoder differences in schema
+runs on different hosted CPU runners. This entrypoint therefore also disables oneDNN
+and records the reproducibility controls; the workflow pins OpenMP/MKL to one thread
+and requests MKL's compatible code path before PyTorch starts.
 """
 from __future__ import annotations
 
@@ -18,6 +20,26 @@ import torch
 
 from experiments.measured.contracts import option_text
 from experiments.followup50 import run as g50
+
+
+class ReproducibleEncoder(g50.Encoder):
+    """Frozen encoder with explicit CPU reproducibility metadata.
+
+    Numerical behavior is controlled before model construction by ``main`` and the
+    workflow environment. This subclass does not alter embeddings; it makes the
+    execution contract visible in every result artifact.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.meta = dict(self.meta)
+        self.meta["cpu_reproducibility"] = {
+            "intra_op_threads": 1,
+            "interop_threads": 1,
+            "mkldnn_enabled": False,
+            "mkl_cbwr": "COMPATIBLE",
+            "pythonhashseed": "0",
+        }
 
 
 def features_with_none_cached(encoder, item, clause, online=False):
@@ -55,17 +77,32 @@ def features_with_none_cached(encoder, item, clause, online=False):
     return x, opts, c @ q
 
 
-def main():
-    g50.features_with_none = features_with_none_cached
+def configure_reproducibility():
+    """Configure deterministic CPU execution before any encoder/model work."""
     torch.use_deterministic_algorithms(True)
+    torch.backends.mkldnn.enabled = False
+    torch.set_num_threads(1)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        # PyTorch permits setting inter-op threads only before parallel work starts.
+        # The Actions entrypoint calls this before model construction; retaining the
+        # guard keeps hash-control unit tests import-safe.
+        pass
 
-    # ``g50.main`` historically requests two intra-op threads. Multithreaded CPU
-    # reductions were the only remaining changing execution condition between
-    # identical seeded runs. Preserve the public entrypoint while forcing one
-    # intra-op thread for this repaired execution path.
+
+def main():
+    configure_reproducibility()
+    g50.features_with_none = features_with_none_cached
+    g50.Encoder = ReproducibleEncoder
+
+    # ``g50.main`` historically requests two intra-op threads. Preserve its public
+    # entrypoint while forcing one thread for every call in this repaired path.
     original_set_num_threads = torch.set_num_threads
+
     def deterministic_set_num_threads(_requested):
         original_set_num_threads(1)
+
     torch.set_num_threads = deterministic_set_num_threads
     try:
         g50.main()
