@@ -1,0 +1,29 @@
+name: GDM40 learned policy
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm40/**
+      - .github/workflows/gdm40.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm40
+          python learned_policy.py | tee gdm40.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm40-results
+          path: |
+            experiments/gdm40/artifacts
+            experiments/gdm40/gdm40.log
+          if-no-files-found: error
