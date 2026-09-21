@@ -1,0 +1,25 @@
+name: GDM35 plan AST
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm35/**
+      - .github/workflows/gdm35.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm35
+          python plan_ast.py | tee gdm35.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm35-results
+          path: |
+            experiments/gdm35/artifacts/gdm35.json
+            experiments/gdm35/gdm35.log
+          if-no-files-found: error
