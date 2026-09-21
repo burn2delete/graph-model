@@ -13,6 +13,13 @@ Actions-only same-seed rerun still exposed tiny frozen-encoder differences in sc
 runs on different hosted CPU runners. This entrypoint therefore also disables oneDNN
 and records the reproducibility controls; the workflow pins OpenMP/MKL to one thread
 and requests MKL's compatible code path before PyTorch starts.
+
+The strengthened repair originally configured inter-op threading here and then
+called the historical GDM50 entrypoint, which tried to configure inter-op threading
+a second time. PyTorch rejects that second call once parallel work has started. The
+canonical wrapper now treats the first configuration as authoritative and masks both
+historical thread setters while ``g50.main`` runs, preserving the one-thread contract
+without changing the model or experiment semantics.
 """
 from __future__ import annotations
 
@@ -85,10 +92,10 @@ def configure_reproducibility():
     try:
         torch.set_num_interop_threads(1)
     except RuntimeError:
-        # PyTorch permits setting inter-op threads only before parallel work starts.
-        # The Actions entrypoint calls this before model construction; retaining the
-        # guard keeps hash-control unit tests import-safe.
-        pass
+        # Import-side/unit-test callers may have already started parallel work.
+        # The GitHub Actions entrypoint invokes this before model construction.
+        if torch.get_num_interop_threads() != 1:
+            raise
 
 
 def main():
@@ -96,18 +103,28 @@ def main():
     g50.features_with_none = features_with_none_cached
     g50.Encoder = ReproducibleEncoder
 
-    # ``g50.main`` historically requests two intra-op threads. Preserve its public
-    # entrypoint while forcing one thread for every call in this repaired path.
+    # ``g50.main`` historically requests two intra-op threads and also repeats the
+    # inter-op setter. The reproducibility contract has already been established
+    # above. Mask both historical setters during the call so PyTorch is not asked to
+    # mutate inter-op state after parallel work has begun.
     original_set_num_threads = torch.set_num_threads
+    original_set_num_interop_threads = torch.set_num_interop_threads
 
     def deterministic_set_num_threads(_requested):
         original_set_num_threads(1)
 
+    def deterministic_set_num_interop_threads(_requested):
+        if torch.get_num_interop_threads() != 1:
+            raise RuntimeError("GDM50 reproducibility contract requires one inter-op thread")
+        return None
+
     torch.set_num_threads = deterministic_set_num_threads
+    torch.set_num_interop_threads = deterministic_set_num_interop_threads
     try:
         g50.main()
     finally:
         torch.set_num_threads = original_set_num_threads
+        torch.set_num_interop_threads = original_set_num_interop_threads
 
 
 if __name__ == "__main__":
