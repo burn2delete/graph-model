@@ -8,20 +8,26 @@ though the recorded latency scope claimed cached catalog vectors.
 The first cache-corrected rerun exposed a second measurement problem: identical
 seeds, model revision, packages, dataset hashes and initial checkpoint hashes could
 produce materially different selected checkpoints on the multi-thread CPU path.
-Forcing one PyTorch intra-op thread made operation runs bit-reproducible, but an
-Actions-only same-seed rerun still exposed tiny frozen-encoder differences in schema
-runs on different hosted CPU runners. This entrypoint therefore also disables oneDNN
-and records the reproducibility controls; the workflow pins OpenMP/MKL to one thread
-and requests MKL's compatible code path before PyTorch starts.
+Forcing one PyTorch intra-op thread helped, but exact same-seed Actions reruns still
+showed hosted-runner frozen-encoder numerical drift that could amplify through
+feature-head training, checkpoint selection and validation calibration.
 
-The strengthened repair originally configured inter-op threading here and then
-called the historical GDM50 entrypoint, which tried to configure inter-op threading
-a second time. PyTorch rejects that second call once parallel work has started. The
-canonical wrapper now treats the first configuration as authoritative and masks both
-historical thread setters while ``g50.main`` runs, preserving the one-thread contract
-without changing the model or experiment semantics.
+This repair keeps the transformer frozen and does not change the downstream model
+family. It makes the feature boundary explicit and reproducible: normalized frozen
+encoder outputs are projected onto a fixed 1e-4 decimal grid before they are cached,
+used for training, calibration, evaluation or timed inference. That controlled
+feature canonicalization is part of the measured architecture and is recorded in
+every result artifact together with raw and canonical fixed-probe hashes. The grid
+is intentionally much coarser than the previously observed ~4.77e-7 cross-run drift
+while remaining small relative to normalized embedding magnitudes.
+
+The wrapper also disables oneDNN, fixes PyTorch intra-op/inter-op execution to one
+thread and records the workflow's OpenMP/MKL controls. Historical thread setters are
+masked while ``g50.main`` runs so they cannot mutate the established contract.
 """
 from __future__ import annotations
+
+import hashlib
 
 import torch
 
@@ -29,13 +35,34 @@ from experiments.measured.contracts import option_text
 from experiments.followup50 import run as g50
 
 
-class ReproducibleEncoder(g50.Encoder):
-    """Frozen encoder with explicit CPU reproducibility metadata.
+FEATURE_CANONICALIZATION_QUANTUM = 1e-4
+FEATURE_PROBE_TEXTS = (
+    "GraphQL capability reproducibility probe: author identifier and author name.",
+    "GraphQL capability reproducibility probe: created timestamp and updated timestamp.",
+)
 
-    Numerical behavior is controlled before model construction by ``main`` and the
-    workflow environment. This subclass does not alter embeddings; it makes the
-    execution contract visible in every result artifact.
+
+def canonicalize_embeddings(matrix: torch.Tensor) -> torch.Tensor:
+    """Project frozen normalized embeddings onto the recorded fixed decimal grid.
+
+    Hosted CPU kernels can differ by a few float32 ulps even with deterministic
+    algorithms and a single thread. Those differences are irrelevant to the frozen
+    encoder's intended semantic representation but were large enough to change
+    downstream checkpoint selection. Canonicalization occurs exactly once at the
+    frozen-feature boundary and is therefore an explicit measured model contract,
+    not a post-hoc metric repair.
     """
+    quantum = FEATURE_CANONICALIZATION_QUANTUM
+    return torch.round(matrix / quantum) * quantum
+
+
+def tensor_sha256(matrix: torch.Tensor) -> str:
+    data = matrix.detach().cpu().contiguous().numpy().tobytes()
+    return hashlib.sha256(data).hexdigest()
+
+
+class ReproducibleEncoder(g50.Encoder):
+    """Frozen encoder with explicit CPU and feature reproducibility metadata."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -47,6 +74,39 @@ class ReproducibleEncoder(g50.Encoder):
             "mkl_cbwr": "COMPATIBLE",
             "pythonhashseed": "0",
         }
+        self.meta["feature_canonicalization"] = {
+            "kind": "post-normalization-fixed-decimal-grid",
+            "quantum": FEATURE_CANONICALIZATION_QUANTUM,
+            "applies_to": "all frozen encoder outputs before cache/training/calibration/evaluation/timing",
+            "architecture_change": True,
+            "reason": "absorb hosted-CPU frozen-encoder numerical drift before learned feature-head training",
+        }
+
+        # Preserve both hashes so the next exact rerun can distinguish remaining
+        # frozen-encoder drift from failure of the canonical feature boundary.
+        raw_probe = super().encode(FEATURE_PROBE_TEXTS, cached=False)
+        canonical_probe = canonicalize_embeddings(raw_probe)
+        self.meta["reproducibility_probe"] = {
+            "texts_sha256": hashlib.sha256("\n".join(FEATURE_PROBE_TEXTS).encode()).hexdigest(),
+            "raw_feature_sha256": tensor_sha256(raw_probe),
+            "canonical_feature_sha256": tensor_sha256(canonical_probe),
+            "rows": len(FEATURE_PROBE_TEXTS),
+            "dim": int(canonical_probe.shape[-1]),
+        }
+
+    def encode(self, texts, cached=True, batch_size=8):
+        # Base Encoder normalizes embeddings before returning them. Canonicalize that
+        # normalized feature representation, then replace any newly populated cache
+        # entries so every subsequent path observes the same canonical feature.
+        texts = list(texts)
+        matrix = super().encode(texts, cached=cached, batch_size=batch_size)
+        matrix = canonicalize_embeddings(matrix)
+        if cached:
+            for text, vector in zip(texts, matrix):
+                self.cache[text] = vector.detach()
+        if not torch.isfinite(matrix).all():
+            raise FloatingPointError("Nonfinite canonical frozen embedding")
+        return matrix
 
 
 def features_with_none_cached(encoder, item, clause, online=False):
