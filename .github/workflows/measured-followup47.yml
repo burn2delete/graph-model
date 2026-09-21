@@ -56,7 +56,7 @@ jobs:
       - name: Train and independently verify smoke policy
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup47.run --backbone hash --task operation --arms curriculum-scoreonly --seeds 4701 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
+          GITHUB_ACTIONS=true python -m experiments.followup47.execute --backbone hash --task operation --arms curriculum-scoreonly --seeds 4701 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
           python - <<'PY'
           from pathlib import Path
           from experiments.followup47.collect import verify_summary
@@ -108,7 +108,7 @@ jobs:
           TASK: ${{ matrix.task }}
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup47.run --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          GITHUB_ACTIONS=true python -m experiments.followup47.execute --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
           test -s artifacts/results/worker.json
       - uses: actions/upload-artifact@v4
         if: always()
