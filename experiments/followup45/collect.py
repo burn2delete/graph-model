@@ -10,6 +10,7 @@ import statistics
 
 import torch
 
+from experiments.measured.models import state_hash
 from .run import ARMS, FORMAT
 
 
@@ -29,6 +30,13 @@ def prediction_rows(path):
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
 
+def metric_accuracy(summary, field, task):
+    metrics = summary[field]
+    if task not in metrics or "accuracy" not in metrics[task]:
+        raise AssertionError(f"missing {field}.{task}.accuracy")
+    return float(metrics[task]["accuracy"])
+
+
 def verify_summary(summary_path):
     directory = summary_path.parent
     summary = load_json(summary_path)
@@ -38,6 +46,7 @@ def verify_summary(summary_path):
     if summary.get("evidence_kind") != "trained-feature-model":
         errors.append("not trained-feature-model")
     config = summary.get("config", {})
+    task = config.get("task")
     if config.get("model_scope") != "frozen pretrained encoder + learned feature adapter/heads":
         errors.append("model scope missing or dishonest")
     training = summary.get("training", {})
@@ -52,8 +61,18 @@ def verify_summary(summary_path):
     initial, selected = directory / "initial.pt", directory / "selected.pt"
     if not initial.exists() or not selected.exists():
         errors.append("checkpoint file missing")
-    elif file_hash(initial) == file_hash(selected):
-        errors.append("checkpoint files identical")
+    else:
+        if file_hash(initial) == file_hash(selected):
+            errors.append("checkpoint files identical")
+        try:
+            initial_obj = torch.load(initial, map_location="cpu", weights_only=True)
+            selected_obj = torch.load(selected, map_location="cpu", weights_only=True)
+            if state_hash(initial_obj["state"]) != training.get("initial_state_hash"):
+                errors.append("initial checkpoint state hash mismatch")
+            if state_hash(selected_obj["state"]) != training.get("selected_state_hash"):
+                errors.append("selected checkpoint state hash mismatch")
+        except Exception as exc:
+            errors.append("checkpoint load failure: " + type(exc).__name__)
     for name, expected in summary.get("file_hashes", {}).items():
         path = directory / name
         if not path.exists() or file_hash(path) != expected:
@@ -67,11 +86,13 @@ def verify_summary(summary_path):
         rows = prediction_rows(path)
         if len(rows) != expected_count or not rows:
             errors.append(f"bad {split} prediction count")
+        raw_correct = 0
         for row in rows:
             if "reference" not in row or "prediction" not in row or "judgment" not in row:
                 errors.append(f"malformed {split} prediction")
                 break
             judgment = row["judgment"]
+            raw_correct += int(bool(judgment.get("request_correct")))
             if row["public"]["task"] == "operation" and row["reference"]["status"] == "accepted" and row["prediction"]["status"] == "accepted":
                 if not isinstance(judgment.get("graphql_valid"), bool) or len(judgment.get("response_matches", [])) != 3:
                     errors.append("operation lacks real GraphQL/fixture evaluation")
@@ -81,6 +102,15 @@ def verify_summary(summary_path):
                 if not isinstance(composition, dict) or not isinstance(composition.get("success"), bool):
                     errors.append("schema accepted prediction lacks Rover composition result")
                     break
+        if rows:
+            field = "regression_metrics" if split == "regression" else "secondary_holdout_metrics"
+            try:
+                reported = metric_accuracy(summary, field, task)
+                reproduced = raw_correct / len(rows)
+                if abs(reported - reproduced) > 1e-12:
+                    errors.append(f"{split} metric does not reproduce from predictions")
+            except Exception as exc:
+                errors.append(f"{split} metric unavailable: {exc}")
     timings = load_json(directory / "timings.json") if (directory / "timings.json").exists() else {}
     samples = timings.get("generation_ms", [])
     if len(samples) < 10 or any((not isinstance(x, (int, float)) or x <= 0) for x in samples):
@@ -136,8 +166,8 @@ def main():
         key = (task, arm, backbone)
         group = groups.setdefault(key, {"regression_accuracy": [], "holdout_accuracy": [],
                                        "p50_ms": [], "p95_ms": [], "rss_kib": []})
-        group["regression_accuracy"].append(summary["regression_metrics"]["request_accuracy"])
-        group["holdout_accuracy"].append(summary["secondary_holdout_metrics"]["request_accuracy"])
+        group["regression_accuracy"].append(metric_accuracy(summary, "regression_metrics", task))
+        group["holdout_accuracy"].append(metric_accuracy(summary, "secondary_holdout_metrics", task))
         group["p50_ms"].append(summary["generation_latency"]["p50_ms"])
         group["p95_ms"].append(summary["generation_latency"]["p95_ms"])
         rss = summary["memory"].get("rss_after_evaluation_kib")
