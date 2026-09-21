@@ -61,14 +61,20 @@ jobs:
       - name: Train and independently verify explicit-NONE smoke policy
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup50.execute --backbone hash --task operation --arms null-calibrated --seeds 5001 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
+          GITHUB_ACTIONS=true python -m experiments.followup50.execute_deterministic --backbone hash --task operation --arms null-calibrated --seeds 5001 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
           python - <<'PY'
           from pathlib import Path
+          import json
           from experiments.followup50.collect import verify_summary
           summaries=list(Path('artifacts/smoke').rglob('summary.json'))
           assert len(summaries)==1, summaries
           verify_summary(summaries[0])
-          print('gdm50 smoke evidence verified')
+          summary=json.loads(summaries[0].read_text())
+          contract=summary['encoder'].get('head_training_reproducibility', {})
+          assert contract.get('adamw_foreach') is False, contract
+          assert contract.get('adamw_fused') is False, contract
+          assert contract.get('clip_grad_norm_foreach') is False, contract
+          print('gdm50 smoke evidence and single-tensor head contract verified')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
@@ -113,7 +119,7 @@ jobs:
           TASK: ${{ matrix.task }}
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup50.execute --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          GITHUB_ACTIONS=true python -m experiments.followup50.execute_deterministic --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
           test -s artifacts/results/worker.json
       - uses: actions/upload-artifact@v4
         if: always()
