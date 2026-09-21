@@ -1,0 +1,29 @@
+name: GDM32 generated hybrid curriculum
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm32/**
+      - .github/workflows/gdm32.yml
+  workflow_dispatch: {}
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m pip install --upgrade pip
+          pip install torch transformers
+      - run: |
+          cd experiments/gdm32
+          python generated_hybrid_curriculum.py | tee gdm32.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm32-results
+          path: |
+            experiments/gdm32/artifacts
+            experiments/gdm32/gdm32.log
+          if-no-files-found: error
