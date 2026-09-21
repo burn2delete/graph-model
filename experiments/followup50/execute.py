@@ -17,8 +17,10 @@ This repair keeps the transformer frozen and preserves the downstream model fami
 It adds two controls without silently changing the existing 1e-4 feature quantum:
 PyTorch ATen CPU dispatch is pinned to its oldest supported/default vector codepath,
 and every first-observed frozen feature is included in a deterministic text-sorted
-raw/canonical corpus hash. The corpus evidence distinguishes CPU-kernel drift from a
-failure of the recorded feature canonicalization over the actual experiment texts.
+raw/canonical corpus hash. PyTorch 2.8 reports that x86 default dispatch as ``NO AVX``;
+we normalize that reporting label to the logical ``DEFAULT`` contract while preserving
+the raw runtime label in evidence. The corpus evidence distinguishes CPU-kernel drift
+from a failure of the recorded feature canonicalization over the actual experiment texts.
 
 The wrapper also disables oneDNN, fixes PyTorch intra-op/inter-op execution to one
 thread and records OpenMP/MKL/ATen controls. Historical thread setters are masked
@@ -70,16 +72,22 @@ class ReproducibleEncoder(g50.Encoder):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.meta = dict(self.meta)
-        runtime_capability = torch.backends.cpu.get_cpu_capability()
+        runtime_capability_reported = torch.backends.cpu.get_cpu_capability()
         requested_capability = os.environ.get("ATEN_CPU_CAPABILITY")
         if requested_capability != "default":
             raise RuntimeError(
                 "GDM50 reproducibility contract requires ATEN_CPU_CAPABILITY=default"
             )
-        if runtime_capability != "DEFAULT":
+        # On the pinned PyTorch 2.8 x86 CPU wheel, ATEN_CPU_CAPABILITY=default
+        # selects the oldest/non-AVX dispatch path and get_cpu_capability() reports
+        # that path as "NO AVX" rather than the logical environment label "DEFAULT".
+        # Accept only those two equivalent reporting labels and preserve the raw one.
+        if runtime_capability_reported not in {"DEFAULT", "NO AVX"}:
             raise RuntimeError(
-                f"ATEN default CPU dispatch was requested but runtime reported {runtime_capability!r}"
+                "ATEN default CPU dispatch was requested but runtime reported "
+                + repr(runtime_capability_reported)
             )
+        runtime_capability = "DEFAULT"
         self.meta["cpu_reproducibility"] = {
             "intra_op_threads": 1,
             "interop_threads": 1,
@@ -92,6 +100,8 @@ class ReproducibleEncoder(g50.Encoder):
             "mkl_dynamic": "FALSE",
             "aten_cpu_capability_env": requested_capability,
             "aten_cpu_capability_runtime": runtime_capability,
+            "aten_cpu_capability_runtime_reported": runtime_capability_reported,
+            "aten_cpu_capability_contract": "oldest-supported/default non-AVX dispatch",
         }
         self.meta["feature_canonicalization"] = {
             "kind": "post-normalization-fixed-decimal-grid",
