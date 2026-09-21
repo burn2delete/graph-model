@@ -5,29 +5,29 @@ for timing. The implementation used ``cached=not online`` for both the request a
 catalog option embeddings, so timed requests re-encoded every catalog option even
 though the recorded latency scope claimed cached catalog vectors.
 
-The first cache-corrected rerun exposed a second measurement problem: identical
-seeds, model revision, packages, dataset hashes and initial checkpoint hashes could
-produce materially different selected checkpoints on the multi-thread CPU path.
-Forcing one PyTorch intra-op thread helped, but exact same-seed Actions reruns still
-showed hosted-runner frozen-encoder numerical drift that could amplify through
-feature-head training, checkpoint selection and validation calibration.
+The cache-corrected reruns exposed a second measurement problem: identical seeds,
+model revision, packages, dataset hashes and initial checkpoint hashes could produce
+materially different selected checkpoints across GitHub-hosted CPU runners. One-thread
+execution, deterministic PyTorch and disabled oneDNN were insufficient. A 1e-4
+post-normalization feature grid made the fixed probe reproducible, but an exact rerun
+still changed every downstream GDM50 configuration, proving that a two-text probe was
+not sufficient to establish the whole frozen-feature boundary.
 
-This repair keeps the transformer frozen and does not change the downstream model
-family. It makes the feature boundary explicit and reproducible: normalized frozen
-encoder outputs are projected onto a fixed 1e-4 decimal grid before they are cached,
-used for training, calibration, evaluation or timed inference. That controlled
-feature canonicalization is part of the measured architecture and is recorded in
-every result artifact together with raw and canonical fixed-probe hashes. The grid
-is intentionally much coarser than the previously observed ~4.77e-7 cross-run drift
-while remaining small relative to normalized embedding magnitudes.
+This repair keeps the transformer frozen and preserves the downstream model family.
+It adds two controls without silently changing the existing 1e-4 feature quantum:
+PyTorch ATen CPU dispatch is pinned to its oldest supported/default vector codepath,
+and every first-observed frozen feature is included in a deterministic text-sorted
+raw/canonical corpus hash. The corpus evidence distinguishes CPU-kernel drift from a
+failure of the recorded feature canonicalization over the actual experiment texts.
 
 The wrapper also disables oneDNN, fixes PyTorch intra-op/inter-op execution to one
-thread and records the workflow's OpenMP/MKL controls. Historical thread setters are
-masked while ``g50.main`` runs so they cannot mutate the established contract.
+thread and records OpenMP/MKL/ATen controls. Historical thread setters are masked
+while ``g50.main`` runs so they cannot mutate the established contract.
 """
 from __future__ import annotations
 
 import hashlib
+import os
 
 import torch
 
@@ -43,15 +43,7 @@ FEATURE_PROBE_TEXTS = (
 
 
 def canonicalize_embeddings(matrix: torch.Tensor) -> torch.Tensor:
-    """Project frozen normalized embeddings onto the recorded fixed decimal grid.
-
-    Hosted CPU kernels can differ by a few float32 ulps even with deterministic
-    algorithms and a single thread. Those differences are irrelevant to the frozen
-    encoder's intended semantic representation but were large enough to change
-    downstream checkpoint selection. Canonicalization occurs exactly once at the
-    frozen-feature boundary and is therefore an explicit measured model contract,
-    not a post-hoc metric repair.
-    """
+    """Project frozen normalized embeddings onto the recorded fixed decimal grid."""
     quantum = FEATURE_CANONICALIZATION_QUANTUM
     return torch.round(matrix / quantum) * quantum
 
@@ -61,18 +53,45 @@ def tensor_sha256(matrix: torch.Tensor) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def feature_corpus_sha256(per_text_hashes: dict[str, str]) -> str:
+    """Hash first-observed text/vector hashes independent of encounter order."""
+    h = hashlib.sha256()
+    for text in sorted(per_text_hashes):
+        encoded = text.encode("utf-8")
+        h.update(len(encoded).to_bytes(8, "big"))
+        h.update(encoded)
+        h.update(bytes.fromhex(per_text_hashes[text]))
+    return h.hexdigest()
+
+
 class ReproducibleEncoder(g50.Encoder):
-    """Frozen encoder with explicit CPU and feature reproducibility metadata."""
+    """Frozen encoder with explicit CPU and feature reproducibility evidence."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.meta = dict(self.meta)
+        runtime_capability = torch.backends.cpu.get_cpu_capability()
+        requested_capability = os.environ.get("ATEN_CPU_CAPABILITY")
+        if requested_capability != "default":
+            raise RuntimeError(
+                "GDM50 reproducibility contract requires ATEN_CPU_CAPABILITY=default"
+            )
+        if runtime_capability != "DEFAULT":
+            raise RuntimeError(
+                f"ATEN default CPU dispatch was requested but runtime reported {runtime_capability!r}"
+            )
         self.meta["cpu_reproducibility"] = {
             "intra_op_threads": 1,
             "interop_threads": 1,
             "mkldnn_enabled": False,
             "mkl_cbwr": "COMPATIBLE",
             "pythonhashseed": "0",
+            "omp_num_threads": "1",
+            "mkl_num_threads": "1",
+            "omp_dynamic": "FALSE",
+            "mkl_dynamic": "FALSE",
+            "aten_cpu_capability_env": requested_capability,
+            "aten_cpu_capability_runtime": runtime_capability,
         }
         self.meta["feature_canonicalization"] = {
             "kind": "post-normalization-fixed-decimal-grid",
@@ -82,8 +101,6 @@ class ReproducibleEncoder(g50.Encoder):
             "reason": "absorb hosted-CPU frozen-encoder numerical drift before learned feature-head training",
         }
 
-        # Preserve both hashes so the next exact rerun can distinguish remaining
-        # frozen-encoder drift from failure of the canonical feature boundary.
         raw_probe = super().encode(FEATURE_PROBE_TEXTS, cached=False)
         canonical_probe = canonicalize_embeddings(raw_probe)
         self.meta["reproducibility_probe"] = {
@@ -93,14 +110,45 @@ class ReproducibleEncoder(g50.Encoder):
             "rows": len(FEATURE_PROBE_TEXTS),
             "dim": int(canonical_probe.shape[-1]),
         }
+        self._raw_text_feature_hashes: dict[str, str] = {}
+        self._canonical_text_feature_hashes: dict[str, str] = {}
+        self._refresh_feature_corpus_meta()
+
+    def _refresh_feature_corpus_meta(self) -> None:
+        self.meta["feature_corpus"] = {
+            "scope": "first observed frozen encoding for every unique experiment text, sorted by text before aggregate hashing",
+            "unique_texts": len(self._canonical_text_feature_hashes),
+            "raw_text_feature_sha256": feature_corpus_sha256(self._raw_text_feature_hashes),
+            "canonical_text_feature_sha256": feature_corpus_sha256(self._canonical_text_feature_hashes),
+        }
+
+    def _record_feature(self, text: str, raw: torch.Tensor, canonical: torch.Tensor) -> None:
+        raw_hash = tensor_sha256(raw.reshape(1, -1))
+        canonical_hash = tensor_sha256(canonical.reshape(1, -1))
+        previous = self._canonical_text_feature_hashes.get(text)
+        if previous is not None and previous != canonical_hash:
+            raise RuntimeError(
+                "Canonical frozen feature changed within one Actions worker for text "
+                + hashlib.sha256(text.encode()).hexdigest()
+            )
+        self._raw_text_feature_hashes.setdefault(text, raw_hash)
+        self._canonical_text_feature_hashes.setdefault(text, canonical_hash)
+        self._refresh_feature_corpus_meta()
 
     def encode(self, texts, cached=True, batch_size=8):
-        # Base Encoder normalizes embeddings before returning them. Canonicalize that
-        # normalized feature representation, then replace any newly populated cache
-        # entries so every subsequent path observes the same canonical feature.
+        # Base Encoder normalizes embeddings before returning them. Record every
+        # genuinely fresh feature, canonicalize the normalized representation, then
+        # replace newly populated cache entries so all downstream paths observe the
+        # measured canonical feature boundary.
         texts = list(texts)
-        matrix = super().encode(texts, cached=cached, batch_size=batch_size)
-        matrix = canonicalize_embeddings(matrix)
+        fresh_indices = [
+            i for i, text in enumerate(texts)
+            if (not cached) or text not in self.cache
+        ]
+        raw_matrix = super().encode(texts, cached=cached, batch_size=batch_size)
+        matrix = canonicalize_embeddings(raw_matrix)
+        for i in fresh_indices:
+            self._record_feature(texts[i], raw_matrix[i], matrix[i])
         if cached:
             for text, vector in zip(texts, matrix):
                 self.cache[text] = vector.detach()
@@ -152,8 +200,6 @@ def configure_reproducibility():
     try:
         torch.set_num_interop_threads(1)
     except RuntimeError:
-        # Import-side/unit-test callers may have already started parallel work.
-        # The GitHub Actions entrypoint invokes this before model construction.
         if torch.get_num_interop_threads() != 1:
             raise
 
@@ -163,10 +209,6 @@ def main():
     g50.features_with_none = features_with_none_cached
     g50.Encoder = ReproducibleEncoder
 
-    # ``g50.main`` historically requests two intra-op threads and also repeats the
-    # inter-op setter. The reproducibility contract has already been established
-    # above. Mask both historical setters during the call so PyTorch is not asked to
-    # mutate inter-op state after parallel work has begun.
     original_set_num_threads = torch.set_num_threads
     original_set_num_interop_threads = torch.set_num_interop_threads
 
