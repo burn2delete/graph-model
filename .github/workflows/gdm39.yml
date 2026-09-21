@@ -1,0 +1,25 @@
+name: GDM39 end to end
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm39/**
+      - .github/workflows/gdm39.yml
+  workflow_dispatch: {}
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm39
+          python end_to_end.py | tee gdm39.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm39-results
+          path: |
+            experiments/gdm39/artifacts
+            experiments/gdm39/gdm39.log
+          if-no-files-found: error
