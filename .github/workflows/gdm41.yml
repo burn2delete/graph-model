@@ -1,0 +1,54 @@
+name: GDM41 parallel research batch
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm41/**
+      - .github/workflows/gdm41.yml
+  workflow_dispatch: {}
+jobs:
+  matrix-design:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm41
+          python experiment_matrix.py | tee matrix.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm41-matrix
+          path: |
+            experiments/gdm41/artifacts
+            experiments/gdm41/matrix.log
+  operation-arms:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [path-state, terminal-only, retrieval-top2, retrieval-top4, pairwise, independent, shared-encoder, task-adapter]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"task":"operation","arm":"%s","status":"scheduled"}\n' "${{ matrix.arm }}" > results/${{ matrix.arm }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm41-operation-${{ matrix.arm }}
+          path: results
+  schema-arms:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [action-state, capability-set, pairwise, multilabel, shared-encoder, task-adapter, structural-semantic, semantic-only]
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"task":"schema","arm":"%s","status":"scheduled"}\n' "${{ matrix.arm }}" > results/${{ matrix.arm }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm41-schema-${{ matrix.arm }}
+          path: results
