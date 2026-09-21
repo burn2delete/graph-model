@@ -1,0 +1,62 @@
+name: Validate NeoBERT CPU repair
+on:
+  push:
+    branches: [repair/neobert-cpu-xformers]
+    paths:
+      - experiments/measured/models.py
+      - experiments/measured/test_models.py
+      - .github/workflows/neobert-cpu-repair.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+env:
+  APOLLO_ELV2_LICENSE: accept
+  APOLLO_TELEMETRY_DISABLED: 'true'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '2'
+  MKL_NUM_THREADS: '2'
+  PYTHONUNBUFFERED: '1'
+jobs:
+  neobert-cpu-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip install datasets==3.1.0 einops==0.8.1
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip freeze > artifacts/packages.txt
+      - name: Run compatibility and evidence tests
+        run: |
+          set -euo pipefail
+          python -m unittest experiments.measured.test_models -v 2>&1 | tee artifacts/tests.log
+      - name: Load NeoBERT and run measured training/evaluation arms
+        run: |
+          set -euo pipefail
+          python -m experiments.measured.run --backbone neobert --batches 42 --seeds 4101 --epochs 2 --output artifacts/results 2>&1 | tee artifacts/run.log
+          test -s artifacts/results/worker.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: neobert-cpu-repair-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3

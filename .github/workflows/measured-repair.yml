@@ -123,8 +123,10 @@ jobs:
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
           python -m pip install -r experiments/measured/requirements.txt
           if [ '${{ matrix.backbone }}' = neobert ]; then
-            python -m pip install --no-deps xformers==0.0.32.post2
-            python -m pip install einops==0.8.1
+            # NeoBERT's pinned remote code needs these pure-Python dependencies.
+            # Its unconditional xformers imports are handled by the tested eager CPU shim
+            # in experiments/measured/models.py; do not install CUDA xformers on CPU runners.
+            python -m pip install datasets==3.1.0 einops==0.8.1
           fi
           curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
           tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install

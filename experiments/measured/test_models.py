@@ -7,7 +7,7 @@ import torch
 from .batches import all_configs, configs, make
 from .contracts import dataset
 from .evidence import verify
-from .models import Encoder, Features, Policy, candidate_units, labels, predict, state_hash
+from .models import Encoder, Features, Policy, candidate_units, install_neobert_cpu_xformers_shim, labels, predict, state_hash
 
 
 class ModelTests(unittest.TestCase):
@@ -81,6 +81,31 @@ class ModelTests(unittest.TestCase):
     def test_hash_features_deterministic_across_instances(self):
         text = [self.item['request']]
         self.assertTrue(torch.equal(Encoder('hash').encode(text), Encoder('hash').encode(text)))
+
+    def test_neobert_cpu_swiglu_matches_xformers_eager_equation(self):
+        install_neobert_cpu_xformers_shim()
+        from xformers.ops import SwiGLU
+        layer = SwiGLU(5, 7, 3, bias=False)
+        self.assertEqual(set(layer.state_dict()), {'w12.weight', 'w3.weight'})
+        x = torch.randn(2, 4, 5)
+        actual = layer(x)
+        w1, w2 = layer.w12.weight.chunk(2, dim=0)
+        expected = torch.nn.functional.linear(
+            torch.nn.functional.silu(torch.nn.functional.linear(x, w1)) *
+            torch.nn.functional.linear(x, w2), layer.w3.weight)
+        self.assertTrue(torch.allclose(actual, expected, atol=1e-6, rtol=1e-6))
+
+    def test_neobert_cpu_attention_matches_torch_sdpa(self):
+        install_neobert_cpu_xformers_shim()
+        from xformers.ops import memory_efficient_attention
+        q = torch.randn(2, 3, 4, 5)
+        k = torch.randn(2, 3, 4, 5)
+        v = torch.randn(2, 3, 4, 5)
+        bias = torch.zeros(2, 4, 3, 3)
+        actual = memory_efficient_attention(q, k, v, attn_bias=bias, p=0.0)
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=bias, dropout_p=0.0).transpose(1, 2)
+        self.assertTrue(torch.allclose(actual, expected, atol=1e-6, rtol=1e-6))
 
 
 if __name__ == '__main__':
