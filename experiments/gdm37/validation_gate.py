@@ -9,7 +9,7 @@ type Product @key(fields: "id") { id: ID! name: String! created: String! }
 {"id":"reviews","subgraphs":{"products":'''extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
 type Query { product: Product! }
 type Product @key(fields: "id") { id: ID! }
-''',"reviews":'''extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key"])
+''',"reviews":'''extend schema @link(url: "https://specs.apollo.dev/federation/v2.3", import: ["@key", "@external"])
 type Review @key(fields: "id") { id: ID! rating: Int! }
 extend type Product @key(fields: "id") { id: ID! @external reviews: [Review!]! }
 '''},"operations":["query Generated { product { reviews { rating } } }"]}]
