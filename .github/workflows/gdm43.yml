@@ -1,0 +1,50 @@
+name: GDM43 frontier batch
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm43/**
+      - .github/workflows/gdm43.yml
+  workflow_dispatch: {}
+jobs:
+  frontier-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm43
+          python frontier.py | tee gdm43.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm43-frontier
+          path: |
+            experiments/gdm43/artifacts
+            experiments/gdm43/gdm43.log
+  learned-frontier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {task: operation, architecture: path-state, backbone: mmbert}
+          - {task: operation, architecture: retrieval-top2, backbone: mmbert}
+          - {task: operation, architecture: terminal-path, backbone: mmbert}
+          - {task: operation, architecture: task-adapter, backbone: mmbert}
+          - {task: schema, architecture: structural-semantic, backbone: mmbert}
+          - {task: schema, architecture: capability-set, backbone: mmbert}
+          - {task: schema, architecture: action-state, backbone: mmbert}
+          - {task: schema, architecture: task-adapter, backbone: mmbert}
+          - {task: operation, architecture: path-state, backbone: modernbert}
+          - {task: schema, architecture: structural-semantic, backbone: modernbert}
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p results
+          printf '{"task":"%s","architecture":"%s","backbone":"%s","benchmark":"corrected-contracts","metrics":["quality","p50_ms","p95_ms","memory","invalid_rate"]}\n' "${{ matrix.task }}" "${{ matrix.architecture }}" "${{ matrix.backbone }}" > results/result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm43-${{ matrix.task }}-${{ matrix.architecture }}-${{ matrix.backbone }}
+          path: results
