@@ -1,0 +1,39 @@
+name: GDM37 schema operation validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/gdm37/**
+      - .github/workflows/gdm37.yml
+  workflow_dispatch: {}
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          cd experiments/gdm37
+          python validation_gate.py | tee gdm37.log
+      - name: Install Rover
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/latest | sh
+          echo "$HOME/.rover/bin" >> "$GITHUB_PATH"
+      - name: Compose every generated Federation case
+        env:
+          APOLLO_ELV2_LICENSE: "accept"
+          APOLLO_TELEMETRY_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          for d in experiments/gdm37/artifacts/catalog experiments/gdm37/artifacts/reviews; do
+            (cd "$d" && rover supergraph compose --config supergraph.yaml > supergraph.graphql)
+            test -s "$d/supergraph.graphql"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdm37-results
+          path: |
+            experiments/gdm37/artifacts
+            experiments/gdm37/gdm37.log
+          if-no-files-found: error
