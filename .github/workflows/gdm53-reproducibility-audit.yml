@@ -87,7 +87,7 @@ jobs:
           }
           ATTEMPT_DIGESTS = {
               1: {
-                  'report': 'sha256:c2c892accac795e940f7648ea23d64ab9fa870424f66cf67d45aa4059841ba3',
+                  'report': 'sha256:c2c892accac795e940f7648ea23d64ab9fa870424f66cf67d45aa4059841ba3e',
                   'operation': 'sha256:740106fec4e57a5e513fcc14410d23e285df47104083880595ffffcca418c1b1',
                   'schema': 'sha256:1a5ee0b0350f4d6c6434714655c3d71aaecc0cccdbd7d2e1b7aa3a11262bb3cd',
                   'preflight': 'sha256:d2a25c6d20c680cebd3e7c68b678a2d74ff0add86ed415762603c2b13ef48db3',
