@@ -8,12 +8,12 @@ Research is limited to **operation generation and schema generation**. **Query p
 
 ## Current research state
 
-_Last synchronized: 2026-09-22. Latest canonical experiment: GDM54._
+_Last synchronized: 2026-09-22. Latest canonical experiment: GDM55._
 
 | State | Meaning |
 | --- | --- |
-| **Canonical through GDM54** | GDM50–GDM54 each have two independently verified measured attempts and a passing exact-attempt reproducibility audit. Canonical means usable, reproducible evidence under the recorded execution contract—not that every arm is a winner. |
-| **GDM55: unpromoted** | Ambiguity-curriculum generalization is the next experiment. Its initial [run 35749924051](https://github.com/burn2delete/graph-model/actions/runs/35749924051) failed in preflight before smoke or measured training. It requires an in-place repair; no GDM55 performance result is claimed here. |
+| **Canonical through GDM55** | GDM50–GDM55 each have two independently verified measured attempts and a passing exact-attempt reproducibility audit. Canonical means usable, reproducible evidence under the recorded execution contract—not that every arm is a winning architecture. |
+| **Next hypothesis: curriculum balance/stability, unpromoted** | GDM55 shows that broader relation-family supervision can recover some held-out ambiguity, but the effect is strongly seed/task dependent and a bundled full curriculum can make ambiguity worse. The next bounded question is how to preserve relation-family gains while stabilizing them and avoiding NO_MATCH/publication regressions. No result is claimed for that hypothesis yet. |
 | **Invalid historical evidence** | The original GDM41–44 runs produced manifests and fabricated/simulated scores, not model results. Those scores and their promotions are withdrawn. Only the [canonical measured repair](https://github.com/burn2delete/graph-model/actions/runs/35565425124), with 196/196 verified results, is the GDM41–44 baseline. |
 
 Read the [measurement policy](experiments/MEASUREMENT_POLICY.md) and [repair record](experiments/measured/REPAIR.md) before interpreting results or changing an experiment. Historical code and logs are retained for diagnosis; their presence does not make them current architecture or valid evidence.
@@ -91,15 +91,15 @@ These are **feature adapters over frozen representations**, not internal transfo
 
 ### 4. A separate learned ambiguity discriminator
 
-The [GDM51 architecture](experiments/followup51/run.py), retained by the later structured-head experiments, adds a clause-local ambiguity discriminator. First the capability model is trained and selected; then its weights remain fixed while the ambiguity head is trained.
+The [GDM51 architecture](experiments/followup51/run.py), retained by GDM52–GDM55, adds a clause-local ambiguity discriminator. First the capability model is trained and selected; then its weights remain fixed while the ambiguity head is trained.
 
 The basic ambiguity input has seven scalar features: NONE-versus-best-real and best-versus-second-real logit margins, three probabilities, and two encoder similarity scores. The structured variant adds four signals about the top-two candidates: embedding similarity, shared parent path, equal depth, and matching leaf-kind classification. Its MLP has a 32-unit hidden layer.
 
-**The structured ambiguity head sees eleven summary features, not the entire request embedding or the full graph.** It is a learned discriminator over candidate evidence, not a general symbolic ambiguity reasoner. Curriculum diversity and information lost by this representation remain research questions.
+**The structured ambiguity head sees eleven summary features, not the entire request embedding or the full graph.** It is a learned discriminator over candidate evidence, not a general symbolic ambiguity reasoner. GDM55 changes only what ambiguity examples this same head trains on; it does not change the head architecture.
 
 ### 5. Calibration and deterministic arbitration
 
-Training produces scores; validation-only calibration chooses how to act on them. The reference policy uses the NONE margin for `NO_MATCH`, then ambiguity confidence for `AMBIGUOUS`, otherwise the best real path. GDM54 measures alternate clause-level ordering and a separately calibrated high-confidence ambiguity rescue threshold.
+Training produces scores; validation-only calibration chooses how to act on them. The reference policy uses the NONE margin for `NO_MATCH`, then ambiguity confidence for `AMBIGUOUS`, otherwise the best real path. GDM54 measured alternate ordering and high-confidence ambiguity rescue. GDM55 holds the GDM54 5pp high-confidence rescue policy fixed while changing only the ambiguity-head curriculum.
 
 Request aggregation is explicit: any remaining `NO_MATCH` clause rejects the request as `NO_MATCH`; otherwise any `AMBIGUOUS` clause makes the request ambiguous; otherwise selected paths are deduplicated and emitted. Changing clause precedence is not the same as changing this request-level rule.
 
@@ -141,47 +141,103 @@ The architecture above is an evolving research line, not a collection of univers
 | [GDM50](experiments/followup50/) | Explicit NONE makes an open-set outcome possible in listwise scoring, but does not by itself solve ambiguity or multi-clause recall. Repeated runs also exposed numerical and timing defects. | Retain an explicit unsupported outcome and strict evidence/reproducibility gates; do not promote an architecture from one green run. |
 | [GDM51](experiments/followup51/) | A separate clause-local ambiguity discriminator recovered substantial answerable recall in its tested configurations, but risk/publication tradeoffs remained. | Separate capability scoring from ambiguity recognition; success on one synthetic holdout is not broad generalization. |
 | [GDM52–GDM53](experiments/followup53/) | Sequential risk-first calibration cut incorrect publication at a recall cost. A zero-loss validation floor returned the joint control; relaxed budgets exposed intermediate points, particularly for schemas. | Evaluate a measured precision/recall tradeoff rather than a single aggregate accuracy. A validation floor need not transfer to held-out cases. |
-| [GDM54](experiments/followup54/) | Ambiguity-first ordering recovered very few ambiguous cases while losing many correct NO_MATCH decisions. Constrained rescue did not improve held-out ambiguity over NO_MATCH-first. | The tested ordering changes are insufficient. Curriculum/representation improvement is the next hypothesis—not a proven solution or a proof that every possible calibration method is exhausted. |
+| [GDM54](experiments/followup54/) | Ambiguity-first ordering recovered very few ambiguous cases while losing many correct NO_MATCH decisions. Constrained rescue did not improve held-out ambiguity over NO_MATCH-first. | The tested ordering changes are insufficient; improve the learned ambiguity evidence before doing more threshold-only work. |
+| [GDM55](experiments/followup55/) | Broader relation-family supervision can recover additional AMBIGUOUS cases, but gains are task/seed dependent. Lexical expansion is modest; volume alone does not explain relation gains; the bundled full curriculum can reduce ambiguity detection and increase incorrect publication. | Broader supervision is useful signal, not a solved recipe. The next bounded question is **balanced, stable relation-family training** that preserves NO_MATCH/publication behavior. |
 
-### Latest canonical result: GDM54
+## Latest canonical result: GDM55
 
-The following is a **within-batch comparison on the same Ticket/Account holdout**, not a ranking against the different holdouts used by GDM50–GDM53. Rates are means over seeds `5401,5402`; count columns pool those two seeds from one measured attempt. Each task has **76 unique holdout cases**: 36 answerable, 32 NO_MATCH, and 8 AMBIGUOUS. Thus `6/16` below is eight ambiguity cases evaluated by two models, not sixteen independent semantic worlds. The reproducibility rerun does not increase the sample size.
+GDM55 is an **ambiguity-curriculum-only experiment**. It keeps the canonical GDM51 structured capability/ambiguity architecture, GDM50 numerical path, explicit NONE objective, `1e-4` frozen-feature grid, deterministic schema/operation realization, and GDM54 5pp ambiguity-rescue policy fixed. Only the ambiguity-head training curriculum changes.
 
-| Task / arbitration | Answerable accuracy | Risk accuracy | Incorrect publication | AMBIGUOUS correct | NO_MATCH correct |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Operation / NO_MATCH-first | 37.50% | 55.00% | 19.74% | 1/16 | 43/64 |
-| Operation / ambiguity-first | 37.50% | 36.25% | 19.74% | 2/16 | 27/64 |
-| Operation / rescue 0pp, 5pp, or 10pp | 37.50% | 50.00% | 19.74% | 1/16 | 39/64 |
-| Schema / NO_MATCH-first | 44.44% | 61.25% | 14.47% | 6/16 | 43/64 |
-| Schema / ambiguity-first | 44.44% | 27.50% | 14.47% | 8/16 | 14/64 |
-| Schema / rescue 0pp, 5pp, or 10pp | 44.44% | 58.75% | 14.47% | 6/16 | 41/64 |
+The five arms are:
 
-All operation arms have **96.77% target precision / 32.81% target recall**; all schema arms have **100% / 39.06%**. Correct answerable requests fall from **17/32 to 9/24 to 1/16** for operations and **18/32 to 10/24 to 4/16** for schemas as clause count increases from one to three. This combines status rejection and any selection error; it is not a pure false-rejection metric.
+- `canonical-rescue-control`: the canonical GDM51 ambiguity curriculum;
+- `volume-matched-control`: repeats canonical semantics at the larger update budget;
+- `lexical-expanded-rescue`: broader paraphrases over canonical relation families;
+- `relation-expanded-rescue`: additional ambiguity relation families at the same expanded update budget;
+- `full-curriculum-rescue`: lexical + relation diversity + matched disambiguating counterfactual negatives + training-only domain randomization.
 
-Regression request accuracy is also separate: operation NO_MATCH-first / ambiguity-first / rescue is **45.88% / 38.66% / 45.10%**; schema is **44.76% / 33.68% / 43.99%**. These regression suites contain previously inspected cases and are not fresh evidence of generalization.
+The full curriculum is a bundled treatment. GDM55 does **not** identify which ingredient in that bundle causes any effect.
 
-The accepted operation errors include moderator-name requests selecting author-name paths. No accepted schema semantic confusion was recorded on this holdout, but that does **not** erase the low recall or incorrect publication on risk cases.
+### Data and denominators
 
-### What the metrics mean
+Environment/Pipeline is calibration-only. Campaign/Profile is the fresh GDM55 secondary holdout and is now regression-only for subsequent experiments. Each task has **84 unique holdout cases**: 36 answerable, 32 NO_MATCH, and 16 AMBIGUOUS. Rates below are means over seeds `5501,5502`; status counts pool those two seeds from one measured attempt. Therefore `17/32` means sixteen unique ambiguous cases evaluated by two independently initialized models—not thirty-two unique semantic worlds. The exact reproducibility rerun does not increase sample size.
+
+### Operation generation
+
+| Curriculum | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Canonical rescue | 30.56% | 43.75% | 11.90% | 100.00% | 22.66% | 12/32 | 30/64 |
+| Volume matched | 31.94% | 43.75% | 12.50% | 100.00% | 23.44% | 10/32 | 32/64 |
+| Lexical expanded | 34.72% | 44.79% | 14.29% | 98.08% | 29.69% | 10/32 | 33/64 |
+| Relation expanded | 33.33% | 42.71% | **11.31%** | **100.00%** | 24.22% | **17/32** | 24/64 |
+| Full curriculum | **37.50%** | 38.54% | 22.62% | 92.26% | **37.50%** | 8/32 | 29/64 |
+
+Operation relation expansion recovers **7 more AMBIGUOUS decisions than the volume-matched control (17/32 vs 10/32)** while using the same ambiguity optimizer-update budget, which is evidence that semantic relation diversity—not exposure alone—matters in this bounded setting. The gain is not free: NO_MATCH falls from 32/64 to 24/64. The full curriculum has the highest answerable accuracy and target recall but doubles incorrect publication relative to relation expansion and detects fewer ambiguities.
+
+Multi-clause exact correctness remains weak. For the relation-expanded arm, correct answerable requests are **17/32 one-clause, 7/24 two-clause, and 0/16 three-clause**. For full curriculum they are 17/32, 9/24, and 1/16. This is a persistent request-level compounding problem, not solved by ambiguity curriculum alone.
+
+### Schema generation
+
+| Curriculum | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Canonical rescue | 40.28% | 40.62% | 29.76% | 89.17% | 38.28% | 4/32 | 35/64 |
+| Volume matched | 40.28% | 42.71% | 25.60% | 90.95% | 35.94% | 8/32 | 33/64 |
+| Lexical expanded | 41.67% | **47.92%** | 26.19% | 89.29% | 39.06% | 10/32 | **36/64** |
+| Relation expanded | 44.44% | 46.88% | **24.40%** | **92.06%** | 40.62% | **10/32** | 35/64 |
+| Full curriculum | **48.61%** | 33.33% | 31.55% | 89.28% | **45.31%** | 0/32 | 32/64 |
+
+Schema relation expansion improves answerable accuracy, target precision/recall, ambiguity recovery, and incorrect publication relative to the volume-matched control. Lexical expansion slightly wins aggregate risk accuracy because it retains one more NO_MATCH. The full curriculum again shows interference: it improves answerable recall but collapses AMBIGUOUS detection to **0/32** and has the highest incorrect-publication rate in the schema sweep.
+
+For schema relation expansion, correct answerable requests are **19/32 one-clause, 10/24 two-clause, and 3/16 three-clause**. Full curriculum reaches 20/32, 12/24, and 3/16. Longer requests remain substantially harder.
+
+### Ambiguity-family behavior
+
+Counts below pool seeds; each family has eight decisions (four unique cases × two seeds).
+
+| Task / curriculum | Lifecycle-time | Object-vs-supplier | Representation | Role |
+| --- | ---: | ---: | ---: | ---: |
+| Operation / canonical | 4/8 | 0/8 | 2/8 | 6/8 |
+| Operation / volume | 4/8 | 0/8 | 1/8 | 5/8 |
+| Operation / lexical | 4/8 | 0/8 | 2/8 | 4/8 |
+| Operation / relation | 4/8 | **2/8** | **4/8** | **7/8** |
+| Operation / full | 4/8 | 0/8 | 2/8 | 2/8 |
+| Schema / canonical | 4/8 | 0/8 | 0/8 | 0/8 |
+| Schema / volume | 5/8 | 0/8 | 2/8 | 1/8 |
+| Schema / lexical | 4/8 | **2/8** | **4/8** | 0/8 |
+| Schema / relation | **6/8** | **2/8** | 2/8 | 0/8 |
+| Schema / full | 0/8 | 0/8 | 0/8 | 0/8 |
+
+Relation-family expansion is the first tested curriculum in this line to recover held-out `object-vs-supplier` ambiguity in both tasks. It also improves operation role/representation ambiguity. But family behavior is **seed unstable**: for operation relation expansion, seed 5501 gets 14/16 ambiguous cases correct while seed 5502 gets 3/16; schema relation expansion moves in the opposite direction (2/16 versus 8/16). The next experiment should target stability rather than simply add more heterogeneous examples.
+
+### Semantic errors and regressions
+
+The operation canonical, volume, and relation-expanded arms have no accepted semantic-confusion entries in the GDM55 aggregate. Lexical expansion has one author/moderator confusion. Full curriculum has author/moderator and created/updated confusions. Schema arms continue to confuse lifecycle time with review rating in some accepted requests, and the full curriculum also introduces author-name versus author-ID errors.
+
+Regression accuracy is not fresh evidence: operation canonical / volume / lexical / relation / full is **45.74% / 47.26% / 47.11% / 42.48% / 46.12%**; schema is **43.16% / 42.10% / 43.09% / 43.39% / 45.14%**. Those suites contain previously inspected GDM46–GDM54 holdouts.
+
+### Speed, memory, and numerical execution
+
+Attempt 1 shows no meaningful architectural latency/memory separation among the curriculum-only arms. Operation mean per-seed p50 is **63.23–65.34 ms**, p95 **122.96–124.43 ms**, and process RSS **646,630–660,894 KiB**. Schema p50 is **61.12–62.01 ms**, p95 **119.59–123.15 ms**, and RSS **650,648–668,300 KiB**. The exact audit also records attempt-2 hosted-runner variation, especially schema latency, while deterministic predictions/hashes remain exact.
+
+These timings cover fresh request-clause encoding + learned feature-space scoring + deterministic generation/local validation with catalog/NONE embeddings cached. They exclude model download, initial embedding/index construction, backend fixture execution, and Rover composition. RSS is process-level and affected by earlier work in the same worker; it is not isolated model residency.
+
+The canonical execution path fixes PyTorch/OMP/MKL thread settings, default CPU dispatch, deterministic algorithms, and disables oneDNN. It uses non-foreach/non-fused AdamW and non-foreach clipping. AdamW moments and stored head parameters remain float32, while the final bias-corrected parameter application is recomputed in float64 and cast back to float32. **This remains feature-head training over a frozen transformer, not transformer fine-tuning.**
+
+### Canonical interpretation
+
+GDM55 supports three bounded conclusions:
+
+1. **More optimizer exposure alone is not enough.** The volume-matched control does not reproduce the operation ambiguity gain from relation expansion.
+2. **Relation-family diversity can help**, especially operation ambiguity and schema answerable/precision tradeoffs, but the effect is unstable across seeds and costs NO_MATCH recall in operation.
+3. **More heterogeneous data is not monotonically better.** The bundled full curriculum can improve answerable recall while damaging ambiguity detection and publication safety; schema AMBIGUOUS falls to 0/32.
+
+This does **not** prove relation expansion is the final curriculum, nor that counterfactual negatives or domain randomization are intrinsically harmful. The full arm changes several curriculum ingredients together. The next bounded hypothesis is to **factor and balance relation-family training while holding the expanded update budget fixed**, with explicit seed-stability and NO_MATCH/publication constraints.
+
+## What the metrics mean
 
 **Answerable accuracy** is exact request correctness among reference-answerable cases, including the executable/requirements contract—not merely deciding to accept. **Risk accuracy** requires the exact reference status (`NO_MATCH` versus `AMBIGUOUS`), not just any refusal. **Incorrect publication** counts accepted-but-wrong requests over **all evaluated requests**, not only published requests.
 
 **Target precision and recall are counted only on reference-answerable cases.** Rejection yields an empty predicted target set, reducing recall. Consequently, 100% target precision can coexist with incorrect publication on unsupported or ambiguous requests. The [collector definitions](experiments/followup49/collect.py) are authoritative; do not present these precision figures as end-to-end publication safety.
-
-### Speed, memory, and the numerical contract
-
-For the GDM54 NO_MATCH-first control, attempt 1 reports:
-
-| Task | Mean per-seed p50 | Mean per-seed p95 | Mean process RSS after evaluation |
-| --- | ---: | ---: | ---: |
-| Operation | 47.45 ms | 90.16 ms | 652,090 KiB |
-| Schema | 45.66 ms | 88.38 ms | 667,020 KiB |
-
-These are measured single-request warm-generation summaries, **not pooled quantiles, throughput, or an end-to-end service SLA**. Their scope is fresh clause encoding, feature scoring, deterministic generation and local validation, with catalog/NONE vectors cached. Downloads, initial embedding/index construction, backend fixture execution, and Rover composition are excluded; composition is evaluated separately. RSS is process-level and affected by preceding work in the worker, not isolated model-only memory. The audit retains both attempts' latency observations; identical model outputs do not imply identical hosted-runner speed.
-
-The canonical execution path fixes PyTorch/OMP/MKL thread settings, default CPU dispatch, deterministic algorithms, and disables oneDNN. It uses non-foreach/non-fused AdamW and non-foreach clipping. AdamW moments and stored head parameters remain float32, while the final bias-corrected parameter application is recomputed in float64 and cast back to float32. That explicitly recorded repair followed diagnostics of cross-run denominator drift. See [the implementation](experiments/followup50/execute_deterministic.py).
-
-Exact equality has been demonstrated by the recorded Actions attempts. It is **not a general guarantee across arbitrary hardware, library upgrades, or unseen configurations**; each new batch must still pass its own audit.
 
 ## Evidence and canonical promotion
 
@@ -210,16 +266,21 @@ Do not launch a duplicate of an active batch or audit. Keep Actions concurrency 
 | GDM52 | [f0ca439](https://github.com/burn2delete/graph-model/commit/f0ca439c3bb567213108b55a3bd56e449425509b) | [35702079193](https://github.com/burn2delete/graph-model/actions/runs/35702079193) | [35711502477](https://github.com/burn2delete/graph-model/actions/runs/35711502477) |
 | GDM53 | [97b8ceb](https://github.com/burn2delete/graph-model/commit/97b8ceb7c3820690545873e9ced2854ad1e26cee) | [35717392980](https://github.com/burn2delete/graph-model/actions/runs/35717392980) | [35728895825](https://github.com/burn2delete/graph-model/actions/runs/35728895825) |
 | GDM54 | [031c7f6](https://github.com/burn2delete/graph-model/commit/031c7f6087eb356f8baeeedcb2bf25ce9fe35cb4) | [35729681954](https://github.com/burn2delete/graph-model/actions/runs/35729681954) | [35748761095](https://github.com/burn2delete/graph-model/actions/runs/35748761095) |
+| **GDM55** | [db13313](https://github.com/burn2delete/graph-model/commit/db13313e7fd5021922768add76aaac617ec21208) | [35755096818, attempts 1/2](https://github.com/burn2delete/graph-model/actions/runs/35755096818) | [35762380169](https://github.com/burn2delete/graph-model/actions/runs/35762380169) |
 
-Latest canonical source report: [GDM54 attempt-1 artifact 10695003395](https://github.com/burn2delete/graph-model/actions/runs/35729681954/artifacts/10695003395), ZIP SHA256 `7ee5658705431bcbad90dca5c3e5cd8511b373a567c375ab7f2dbcd60ecbca39`. Its independent [audit artifact 10703898523](https://github.com/burn2delete/graph-model/actions/runs/35748761095/artifacts/10703898523) has ZIP SHA256 `c334c8a4d342b23d88cc289f7bb8a5915d69c8352c4848488db3b8e1d0427cad`. Artifact retention is finite; a link or this summary is not a substitute for retained evidence when re-verification is needed.
+GDM55 attempt-1 BATCH_REPORT artifact [10708637460](https://github.com/burn2delete/graph-model/actions/runs/35755096818/artifacts/10708637460) has ZIP SHA256 `54c8a2893521c18d6bc0ae527ca4c4aee187b3adcf99121e7d41b6e53823dd51`; attempt-2 report artifact [10710285394](https://github.com/burn2delete/graph-model/actions/runs/35755096818/artifacts/10710285394) has ZIP SHA256 `eacb659e4e3a63c9650ad1d71fc39e0a4a9a8cd9c885f9bae8e56abe9133c265`.
 
-## Next experiment: GDM55, not a result
+The independent GDM55 audit artifact [10710766560](https://github.com/burn2delete/graph-model/actions/runs/35762380169/artifacts/10710766560) has ZIP SHA256 `1102fb7776ee0108c68d5fe735fe1f2a02a7b6c927b7f8932093010eb9ae9d48`. Its `REPRODUCIBILITY_REPORT.json` records `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, and exact **operation 10/10 + schema 10/10** matches. All twenty comparisons have empty deterministic `differing_fields`; canonical and raw feature comparisons also have no differences in this audit.
 
-[GDM55](experiments/followup55/) tests whether broader ambiguity supervision helps where the tested arbitration changes did not. It holds the structured architecture, capability objective, canonical numerical path, feature quantum, schema realization, and GDM54 5pp rescue calibration policy fixed; only the ambiguity-head curriculum changes.
+The earlier GDM55 source commit `52ffdd8ef2aaf009d56a37bf53b38b3a3c0444e6` / run `35749924051` failed only in preflight because a test expected eight instead of the deliberately generated sixteen AMBIGUOUS holdout rows. Smoke and measured workers were skipped, so it is preserved as an implementation diagnostic—not model evidence. The in-place repair at canonical source `db13313...` changed only that test expectation.
 
-Its five arms distinguish the canonical curriculum, repeated canonical examples at a larger update budget, lexical expansion, relation-family expansion, and a full curriculum combining diversity with disambiguating counterfactual negatives and training-only domain randomization. Volume matching is intended to distinguish more optimizer exposure from more semantic diversity. The full curriculum is a bundled treatment, not a separate causal ablation of each added ingredient.
+Artifact retention is finite; a link or this README summary is not a substitute for retained evidence when re-verification is needed.
 
-Environment/Pipeline is calibration-only; Campaign/Profile is the secondary holdout. Role, lifecycle-time, name-versus-ID representation, and object-versus-supplier naming are separately tracked ambiguity families. Those holdout targets must not select training, checkpoints, calibration, or curriculum changes. Initial preflight failure is an implementation/contract issue to repair, not evidence for or against the modeling hypothesis.
+## Next bounded hypothesis, not a result
+
+GDM55 makes a narrower next step preferable to another architecture change: **factor and balance the relation-expanded ambiguity curriculum** while preserving the GDM55 head architecture, numerical path, capability objective, schema realization, and rescue policy. The experiment should distinguish relation-family balance from counterfactual negatives and training-domain randomization, keep optimizer-update exposure matched, and make seed stability plus NO_MATCH/publication preservation explicit selection criteria.
+
+No GDM56 evidence exists at the time of this synchronization. Campaign/Profile is now inspected and must be regression-only in later work; any next batch requires fresh calibration and secondary-holdout domains.
 
 ## Limits and reading the repository
 
@@ -234,7 +295,7 @@ Benchmark design must retain shortcut controls, candidate-order checks, split-in
 | [experiments/followup50/](experiments/followup50/) | Explicit NONE, cached-catalog boundary, canonical CPU/optimizer execution |
 | [experiments/followup51/](experiments/followup51/) | Staged capability/ambiguity training and structured ambiguity features |
 | [followup52](experiments/followup52/), [followup53](experiments/followup53/), [followup54](experiments/followup54/) | Hierarchical calibration, recall-budget sensitivity, status arbitration |
-| [experiments/followup55/](experiments/followup55/) | Current unpromoted ambiguity-curriculum experiment |
+| [experiments/followup55/](experiments/followup55/) | Canonical ambiguity-curriculum generalization experiment |
 | [.github/workflows/](.github/workflows/) | Actions-only preflights, measured batches, diagnostics, and exact-attempt audits |
 
 Use the declared workflow and its execution wrapper when reproducing an experiment: calling a historical `run.py` directly can bypass the canonical numerical configuration. Inspect the live queue before dispatching anything. No local compilation, tests, training, validation, or benchmarks are part of the accepted research workflow.
