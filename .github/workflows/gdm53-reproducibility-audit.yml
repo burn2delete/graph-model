@@ -401,11 +401,14 @@ jobs:
                   original_batch = load(original_batch_path)
                   verify_batch_flags(original_batch)
 
+                  collector_env = dict(os.environ)
+                  collector_env['GITHUB_SHA'] = SHA
                   subprocess.run(
                       ['python', '-m', 'experiments.followup53.collect', str(workers), '--seeds', '5301,5302'],
                       check=True,
                       stdout=(root / 'rebuild-collector.log').open('w'),
                       stderr=subprocess.STDOUT,
+                      env=collector_env,
                   )
                   rebuilt_batch = load(workers / 'BATCH_REPORT.json')
                   verify_batch_flags(rebuilt_batch)
