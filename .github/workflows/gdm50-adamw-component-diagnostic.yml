@@ -1,0 +1,147 @@
+name: GDM50 AdamW component reproducibility diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - diagnostics/gdm50_adamw_component_trace.py
+      - .github/workflows/gdm50-adamw-component-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm50-head-diagnostic
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  SOURCE_SHA: c84054403c95471f15fb6b6d8363a8f12a0caf4f
+  SOURCE_FOLLOWUP50_TREE: f811d9d758f2bea365b969e14af27864d5bed146
+  SOURCE_WORKFLOW_BLOB: 761004085188edf739f7c14e9efa06f1918e89db
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        replica: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify measured GDM50 source code is unchanged
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:experiments/followup50)" = "$SOURCE_FOLLOWUP50_TREE"
+          test "$(git hash-object .github/workflows/measured-followup50.yml)" = "$SOURCE_WORKFLOW_BLOB"
+      - name: Install pinned CPU dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip freeze > packages.txt
+      - name: Trace AdamW first-step components
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. GITHUB_ACTIONS=true python diagnostics/gdm50_adamw_component_trace.py --output "component-${REPLICA}.json" 2>&1 | tee "component-${REPLICA}.log"
+          test -s "component-${REPLICA}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-adamw-component-${{ github.run_id }}-${{ matrix.replica }}
+          path: |
+            component-${{ matrix.replica }}.json
+            component-${{ matrix.replica }}.log
+            packages.txt
+          if-no-files-found: error
+          retention-days: 14
+  compare:
+    needs: trace
+    if: always() && needs.trace.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm50-adamw-component-${{ github.run_id }}-*
+          path: traces
+      - name: Locate first AdamW sub-operation divergence
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic-report
+          python - <<'PY' 2>&1 | tee diagnostic-report/compare.log
+          import itertools, json
+          from pathlib import Path
+          paths=sorted(Path('traces').rglob('component-*.json'))
+          if len(paths)!=3: raise SystemExit(f'expected three component traces, got {paths}')
+          docs=[json.loads(p.read_text()) for p in paths]
+          for d in docs:
+              assert d['format']=='gdm50-adamw-component-trace-v1'
+              assert d['source_commit']=='c84054403c95471f15fb6b6d8363a8f12a0caf4f'
+              assert d['task']=='schema' and d['arm']=='null-calibrated' and d['seed']==5001
+              assert d['stage_hashes']['standard_addcdiv_parameter']==d['stage_hashes']['actual_single_tensor_adamw_parameter']
+          assert len({d['dataset_sha256'] for d in docs})==1
+          assert len({d['row_id'] for d in docs})==1
+          assert len({d['clause'] for d in docs})==1
+          assert len({d['canonical_feature_probe_sha256'] for d in docs})==1
+          assert len({d['canonical_feature_corpus_sha256'] for d in docs})==1
+          stages=['pre_parameter','clipped_gradient','exp_avg','exp_avg_sq','weight_decay_parameter','denominator','standard_addcdiv_parameter','actual_optimizer_state_tensors','actual_single_tensor_adamw_parameter']
+          rows=[]; earliest=None
+          for (ia,a),(ib,b) in itertools.combinations(enumerate(docs,1),2):
+              diffs=[]
+              for stage in stages:
+                  if a['stage_hashes'][stage]!=b['stage_hashes'][stage]: diffs.append(stage)
+              first=next((s for s in stages if s in diffs),None)
+              rows.append({'replicas':[ia,ib],'first_differing_stage':first,'differing_stages':diffs})
+              if first is not None and (earliest is None or stages.index(first)<stages.index(earliest)):
+                  earliest=first
+          hp=[d['stage_hashes']['float64_parameter_application'] for d in docs]
+          report={
+              'format':'gdm50-adamw-component-diagnostic-v1',
+              'source_commit':'c84054403c95471f15fb6b6d8363a8f12a0caf4f',
+              'diagnostic_workflow_commit':'${{ github.sha }}',
+              'complete':True,
+              'replicas':3,
+              'pair_comparisons':rows,
+              'first_differing_adamw_component':earliest,
+              'float64_parameter_application_hashes':hp,
+              'float64_parameter_application_exact_match':len(set(hp))==1,
+              'conclusion':None,
+          }
+          if earliest is None:
+              report['conclusion']='no AdamW component divergence observed; diagnostic inconclusive'
+              report['diagnostic_conclusive']=False
+          else:
+              report['diagnostic_conclusive']=True
+              report['conclusion']=f'first cross-run AdamW component divergence: {earliest}; float64 final parameter application exact across three runners: {report["float64_parameter_application_exact_match"]}'
+          Path('diagnostic-report/ADAMW_COMPONENT_DIAGNOSTIC.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          if not report['diagnostic_conclusive']: raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-adamw-component-diagnostic-${{ github.run_id }}
+          path: diagnostic-report/
+          if-no-files-found: error
+          retention-days: 14
