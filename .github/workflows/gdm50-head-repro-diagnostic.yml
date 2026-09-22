@@ -1,0 +1,186 @@
+name: GDM50 learned-head reproducibility diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - diagnostics/gdm50_head_repro_trace.py
+      - .github/workflows/gdm50-head-repro-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm50-head-diagnostic
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  SOURCE_SHA: c84054403c95471f15fb6b6d8363a8f12a0caf4f
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        replica: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify measured GDM50 source code is unchanged
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "$SOURCE_SHA"
+          git diff --exit-code "$SOURCE_SHA" -- experiments/followup50 .github/workflows/measured-followup50.yml
+      - name: Install pinned CPU dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip freeze > packages.txt
+      - name: Trace first schema learned-head epoch
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python diagnostics/gdm50_head_repro_trace.py --output "trace-${REPLICA}.json" 2>&1 | tee "trace-${REPLICA}.log"
+          test -s "trace-${REPLICA}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-head-trace-${{ github.run_id }}-${{ matrix.replica }}
+          path: |
+            trace-${{ matrix.replica }}.json
+            trace-${{ matrix.replica }}.log
+            packages.txt
+          if-no-files-found: error
+          retention-days: 14
+  compare:
+    needs: trace
+    if: always() && needs.trace.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm50-head-trace-${{ github.run_id }}-*
+          path: traces
+      - name: Identify the first cross-run learned-head divergence
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic-report
+          python - <<'PY' 2>&1 | tee diagnostic-report/compare.log
+          import itertools, json
+          from pathlib import Path
+
+          paths=sorted(Path('traces').rglob('trace-*.json'))
+          if len(paths)!=3:
+              raise SystemExit(f'expected 3 traces, got {paths}')
+          docs=[json.loads(p.read_text()) for p in paths]
+          for d in docs:
+              assert d['format']=='gdm50-head-repro-trace-v1'
+              assert d['source_commit']=='c84054403c95471f15fb6b6d8363a8f12a0caf4f'
+              assert d['task']=='schema' and d['arm']=='null-calibrated' and d['seed']==5001 and d['epoch']==1
+          assert len({d['updates'] for d in docs})==1
+          assert len({d['dataset_sha256'] for d in docs})==1
+          assert len({d['initial_capability_hash'] for d in docs})==1
+          assert len({d['encoder']['reproducibility_probe']['canonical_feature_sha256'] for d in docs})==1
+
+          stage_fields=[
+              ('example_identity', ('row_id','clause','positives','source')),
+              ('canonical_input', ('input_hash','target_hash')),
+              ('pre_update_parameters', ('pre_state_hash',)),
+              ('forward', ('logits_hash','loss_bits')),
+              ('backward', ('grad_before_clip_hash',)),
+              ('gradient_clipping', ('grad_norm_bits','grad_after_clip_hash')),
+              ('optimizer_update', ('post_state_hash','optimizer_state_hash')),
+          ]
+          pair_reports=[]
+          earliest=None
+          for (ia,a),(ib,b) in itertools.combinations(enumerate(docs,1),2):
+              assert len(a['trace'])==len(b['trace'])
+              first=None
+              for idx,(ra,rb) in enumerate(zip(a['trace'],b['trace']),1):
+                  for stage,fields in stage_fields:
+                      differing=[f for f in fields if ra.get(f)!=rb.get(f)]
+                      if differing:
+                          first={'step':idx,'stage':stage,'fields':differing,
+                                 'row_id':ra['row_id'],'clause':ra['clause'],
+                                 'a':{f:ra.get(f) for f in differing},
+                                 'b':{f:rb.get(f) for f in differing}}
+                          break
+                  if first: break
+              pair={'replicas':[ia,ib],'first_divergence':first,
+                    'final_state_match':a['trace'][-1]['post_state_hash']==b['trace'][-1]['post_state_hash'],
+                    'canonical_corpus_match':a['encoder']['feature_corpus']['canonical_text_feature_sha256']==b['encoder']['feature_corpus']['canonical_text_feature_sha256'],
+                    'raw_corpus_match':a['encoder']['feature_corpus']['raw_text_feature_sha256']==b['encoder']['feature_corpus']['raw_text_feature_sha256']}
+              pair_reports.append(pair)
+              if first and (earliest is None or first['step']<earliest['step'] or
+                            (first['step']==earliest['step'] and [s for s,_ in stage_fields].index(first['stage'])<[s for s,_ in stage_fields].index(earliest['stage']))):
+                  earliest={**first,'replicas':[ia,ib]}
+
+          report={
+              'format':'gdm50-head-repro-diagnostic-v1',
+              'source_commit':'c84054403c95471f15fb6b6d8363a8f12a0caf4f',
+              'diagnostic_workflow_commit':'${{ github.sha }}',
+              'complete':True,
+              'replicas':3,
+              'updates_per_replica':docs[0]['updates'],
+              'initial_capability_hash':docs[0]['initial_capability_hash'],
+              'canonical_probe_hash':docs[0]['encoder']['reproducibility_probe']['canonical_feature_sha256'],
+              'pair_comparisons':pair_reports,
+              'first_observed_divergence':earliest,
+              'conclusion':None,
+          }
+          if earliest is None:
+              report['conclusion']='no cross-run divergence observed in the first schema null-calibrated epoch; diagnostic is inconclusive'
+              report['diagnostic_conclusive']=False
+          elif earliest['stage']=='canonical_input':
+              report['conclusion']='divergence occurs before the learned head because canonical per-step inputs differ'
+              report['diagnostic_conclusive']=True
+          elif earliest['stage']=='forward':
+              report['conclusion']='first divergence is in learned-head forward/loss math with identical canonical inputs and pre-update parameters'
+              report['diagnostic_conclusive']=True
+          elif earliest['stage']=='backward':
+              report['conclusion']='forward/loss matches; first divergence is in learned-head backward gradients'
+              report['diagnostic_conclusive']=True
+          elif earliest['stage']=='gradient_clipping':
+              report['conclusion']='forward and backward gradients match; first divergence is gradient clipping/reduction'
+              report['diagnostic_conclusive']=True
+          elif earliest['stage']=='optimizer_update':
+              report['conclusion']='forward/backward/clipping match; first divergence is AdamW state/parameter update'
+              report['diagnostic_conclusive']=True
+          else:
+              report['conclusion']='state already differs before the current step; inspect the preceding update'
+              report['diagnostic_conclusive']=True
+          Path('diagnostic-report/HEAD_REPRO_DIAGNOSTIC.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({k:report[k] for k in ('complete','diagnostic_conclusive','first_observed_divergence','conclusion')},indent=2))
+          if not report['diagnostic_conclusive']:
+              raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-head-repro-diagnostic-${{ github.run_id }}
+          path: diagnostic-report/
+          if-no-files-found: error
+          retention-days: 14
