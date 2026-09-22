@@ -1,0 +1,518 @@
+name: GDM52 exact-attempt reproducibility audit
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/gdm52-reproducibility-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: graph-model-gdm52-measured
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SOURCE_RUN: '35702079193'
+      SOURCE_SHA: f0ca439c3bb567213108b55a3bd56e449425509b
+      GH_TOKEN: ${{ github.token }}
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OMP_DYNAMIC: 'FALSE'
+      MKL_DYNAMIC: 'FALSE'
+      MKL_CBWR: COMPATIBLE
+      ATEN_CPU_CAPABILITY: default
+      PYTHONHASHSEED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f0ca439c3bb567213108b55a3bd56e449425509b
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source verifier dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output
+          command -v gh
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip freeze > audit-output/packages.txt
+      - name: Verify isolated attempts and compare all twenty configurations
+        run: |
+          set -euo pipefail
+          python - <<'PY' 2>&1 | tee audit-output/audit.log
+          import copy
+          import hashlib
+          import json
+          import math
+          import os
+          import stat
+          import subprocess
+          import traceback
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          import torch
+
+          from experiments.followup52.collect import verify_summary
+          from experiments.followup52.run import ARMS
+          from experiments.measured.models import state_hash
+
+          REPO = 'burn2delete/graph-model'
+          RUN = int(os.environ['SOURCE_RUN'])
+          SHA = os.environ['SOURCE_SHA']
+          OUTPUT = Path('audit-output')
+          ROOT = Path('isolated-evidence')
+          GDM50_CANONICAL = '62d2720800f5d98e1521e0200766a80e998ebe9b'
+          GDM51_CANONICAL = 'f52baf82222947ca00139437e90fe9b5428bd9ae'
+          SEEDS = (5201, 5202)
+          ATTEMPT_IDS = {
+              1: {
+                  'report': 10683416605,
+                  'operation': 10683401248,
+                  'schema': 10683291813,
+                  'preflight': 10681704235,
+              },
+              2: {
+                  'report': 10684832280,
+                  'operation': 10684925494,
+                  'schema': 10684084850,
+                  'preflight': 10684656083,
+              },
+          }
+          ATTEMPT_DIGESTS = {
+              1: {
+                  'report': 'sha256:6ca83dafc1f0830c48b4185eea393d6b3b643eae693eef361c3980fce218094e',
+                  'operation': 'sha256:74fd085139ed393a3f7aef0bb080931687000c9e2de98f6d8053138ce5fd37a1',
+                  'schema': 'sha256:7376b2069acae34afe248e19f338d7afb7434d70abeda2f59fc9daea29e05970',
+                  'preflight': 'sha256:4ac206cd4d869dbcd166087a2cf950bcccdcd4ba1fc11ce29ec36ba7fbfc5b72',
+              },
+              2: {
+                  'report': 'sha256:efa9c1f02c219b74fbbaea4dd93ee4c745cad63588f21f20b29ee2fcc869b961',
+                  'operation': 'sha256:c66b940ff550c489aff3f21e76d0c505908634ac9d9447f8670eb0133a782404',
+                  'schema': 'sha256:c4710e5dbedb8be7f955e8896bba1bed2eca6f7986b1e9ced8f3246f4b328bcf',
+                  'preflight': 'sha256:e40fe05e221830852ddd0202c6442ecb9fad5f49f05c41884d55c42e9c7676b6',
+              },
+          }
+
+          report = {
+              'format': 'gdm52-reproducibility-audit-v1',
+              'source_run': RUN,
+              'source_commit': SHA,
+              'audit_run': os.environ['GITHUB_RUN_ID'],
+              'audit_workflow_commit': os.environ['GITHUB_SHA'],
+              'source_attempts': [1, 2],
+              'complete': False,
+              'evidence_verified': False,
+              'reproducible': False,
+              'promotion_eligible': False,
+              'matched_by_task': {'operation': 0, 'schema': 0},
+              'expected_by_task': {'operation': 10, 'schema': 10},
+              'provenance': {},
+              'comparisons': [],
+              'errors': [],
+              'scope': 'evidence verification only; no model training or architecture experiment',
+          }
+
+          def write_report():
+              OUTPUT.mkdir(parents=True, exist_ok=True)
+              (OUTPUT / 'REPRODUCIBILITY_REPORT.json').write_text(
+                  json.dumps(report, indent=2, sort_keys=True) + '\n'
+              )
+
+          def require(condition, message):
+              if not condition:
+                  raise AssertionError(message)
+
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{REPO}/{path}']))
+
+          def all_items(path, field):
+              out = []
+              page = 1
+              while True:
+                  sep = '&' if '?' in path else '?'
+                  doc = api(f'{path}{sep}per_page=100&page={page}')
+                  batch = doc[field]
+                  out.extend(batch)
+                  if len(batch) < 100:
+                      require(len(out) == doc['total_count'], 'incomplete pagination ' + path)
+                      return out
+                  page += 1
+
+          def file_hash(path):
+              h = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for block in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(block)
+              return h.hexdigest()
+
+          def download(artifact, destination):
+              destination.mkdir(parents=True, exist_ok=False)
+              zpath = destination.with_suffix('.zip')
+              with zpath.open('wb') as handle:
+                  subprocess.run(
+                      ['gh', 'api', f'repos/{REPO}/actions/artifacts/{artifact["id"]}/zip'],
+                      stdout=handle,
+                      check=True,
+                  )
+              require('sha256:' + file_hash(zpath) == artifact['digest'], 'archive digest mismatch')
+              with zipfile.ZipFile(zpath) as archive:
+                  require(sum(item.file_size for item in archive.infolist()) < 1024**3, 'oversized archive')
+                  for item in archive.infolist():
+                      path = PurePosixPath(item.filename)
+                      require(not path.is_absolute(), 'absolute archive path')
+                      require('..' not in path.parts and '\\' not in item.filename, 'unsafe archive path')
+                      require(not stat.S_ISLNK(item.external_attr >> 16), 'archive symlink rejected')
+                  archive.extractall(destination)
+
+          def load(path):
+              return json.loads(path.read_text())
+
+          def one(root, name):
+              paths = list(root.rglob(name))
+              require(len(paths) == 1, f'expected exactly one {name}: {paths}')
+              return paths[0]
+
+          def evidence_flags(doc):
+              require(doc.get('source_commit') == SHA, 'batch source commit mismatch')
+              require(doc.get('complete') is True and doc.get('verified') is True, 'batch not independently verified')
+              require(doc.get('expected_results') == 20 and doc.get('verified_results') == 20, 'batch not 20/20')
+              for field in ('missing_results', 'failed_results', 'unexpected_results'):
+                  require(doc.get(field) == [], f'batch has {field}')
+
+          def normalized_batch(doc):
+              result = copy.deepcopy(doc)
+              for aggregate in result.get('aggregates', []):
+                  aggregate['semantic_confusions'] = sorted(
+                      aggregate.get('semantic_confusions', []),
+                      key=lambda row: (row['reference'], row['predicted'], row['count']),
+                  )
+              return result
+
+          def deterministic_rows(path):
+              rows = {}
+              for line in path.read_text().splitlines():
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  uid = row['id']
+                  require(uid not in rows, 'duplicate prediction id ' + uid)
+                  composition = row.get('judgment', {}).get('composition')
+                  if isinstance(composition, dict):
+                      composition.pop('elapsed_ms', None)
+                  rows[uid] = row
+              return rows
+
+          def cpu_contract(meta):
+              require(meta.get('intra_op_threads') == 1, 'intra-op thread contract missing')
+              require(meta.get('interop_threads') == 1, 'inter-op thread contract missing')
+              require(meta.get('mkldnn_enabled') is False, 'oneDNN contract missing')
+              require(meta.get('mkl_cbwr') == 'COMPATIBLE', 'MKL contract missing')
+              require(meta.get('pythonhashseed') == '0', 'PYTHONHASHSEED contract missing')
+              require(meta.get('omp_num_threads') == '1', 'OMP thread contract missing')
+              require(meta.get('mkl_num_threads') == '1', 'MKL thread count contract missing')
+              require(meta.get('aten_cpu_capability_env') == 'default', 'ATen dispatch contract missing')
+
+          def head_contract(meta):
+              require(meta.get('adamw_foreach') is False, 'AdamW foreach contract missing')
+              require(meta.get('adamw_fused') is False, 'AdamW fused contract missing')
+              require(meta.get('clip_grad_norm_foreach') is False, 'clip-grad foreach contract missing')
+              require(meta.get('moment_update_dtype') == 'float32', 'moment dtype contract missing')
+              require(meta.get('final_parameter_application_dtype') == 'float64->float32', 'parameter application dtype contract missing')
+              require(meta.get('stored_parameter_dtype') == 'float32', 'stored parameter dtype contract missing')
+              require(meta.get('feature_quantum_unchanged') == 1e-4, 'feature quantum contract missing')
+              require(meta.get('numerical_architecture_change') is True, 'numerical architecture change not recorded')
+              require(meta.get('model_objective_changed') is False, 'model objective unexpectedly changed')
+              require(meta.get('gdm52_execution_scope') == 'capability_and_ambiguity_heads', 'GDM52 execution scope missing')
+              require(meta.get('canonical_gdm50_numerical_source_commit') == GDM50_CANONICAL, 'canonical GDM50 provenance missing')
+              require(meta.get('canonical_gdm51_architecture_source_commit') == GDM51_CANONICAL, 'canonical GDM51 provenance missing')
+              require(meta.get('gdm52_change_scope') == 'validation-only status-specific threshold calibration', 'GDM52 change scope missing')
+
+          def substate_hash(state, prefix):
+              sub = {
+                  key.removeprefix(prefix): value
+                  for key, value in state.items()
+                  if key.startswith(prefix)
+              }
+              require(sub, 'missing checkpoint substate ' + prefix)
+              return state_hash(sub)
+
+          def validate_checkpoint(summary, directory, phase):
+              training = summary['training']
+              state = torch.load(directory / f'{phase}.pt', map_location='cpu', weights_only=True)['state']
+              require(state_hash(state) == training[f'{phase}_state_hash'], f'{phase} full-state hash mismatch')
+              require(
+                  substate_hash(state, 'capability.') == training[f'{phase}_capability_hash'],
+                  f'{phase} capability hash mismatch',
+              )
+              ambiguity = {k: value for k, value in state.items() if k.startswith('ambiguity.')}
+              require(ambiguity, f'{phase} ambiguity substate missing')
+              require(
+                  substate_hash(state, 'ambiguity.') == training[f'{phase}_ambiguity_hash'],
+                  f'{phase} ambiguity hash mismatch',
+              )
+
+          def selected_epochs(training):
+              return {
+                  'capability': training['selected_capability_epoch'],
+                  'ambiguity': training['selected_ambiguity_epoch'],
+              }
+
+          def snapshot(summary, directory):
+              training = summary['training']
+              encoder = summary['encoder']
+              return {
+                  'config': summary['config'],
+                  'seed': summary['seed'],
+                  'source_commit': summary['source_commit'],
+                  'dataset_sha256': summary['dataset_sha256'],
+                  'calibration_only_sha256': summary['calibration_only_sha256'],
+                  'secondary_holdout_sha256': summary['secondary_holdout_sha256'],
+                  'model_revision': encoder['revision'],
+                  'pooling': encoder['pooling'],
+                  'feature_canonicalization': encoder['feature_canonicalization'],
+                  'cpu_reproducibility': encoder['cpu_reproducibility'],
+                  'head_training_reproducibility': encoder['head_training_reproducibility'],
+                  'initial_state_hash': training['initial_state_hash'],
+                  'selected_state_hash': training['selected_state_hash'],
+                  'initial_capability_hash': training['initial_capability_hash'],
+                  'selected_capability_hash': training['selected_capability_hash'],
+                  'initial_ambiguity_hash': training['initial_ambiguity_hash'],
+                  'selected_ambiguity_hash': training['selected_ambiguity_hash'],
+                  'selected_epochs': selected_epochs(training),
+                  'optimizer_updates': training['optimizer_updates'],
+                  'capability_optimizer_updates': training['capability_optimizer_updates'],
+                  'ambiguity_optimizer_updates': training['ambiguity_optimizer_updates'],
+                  'selected_capability_optimizer_updates': training['selected_capability_optimizer_updates'],
+                  'selected_ambiguity_optimizer_updates': training['selected_ambiguity_optimizer_updates'],
+                  'calibration': load(directory / 'calibration.json'),
+                  'training_record': load(directory / 'training.json'),
+                  'regression_metrics': summary['regression_metrics'],
+                  'secondary_holdout_metrics': summary['secondary_holdout_metrics'],
+                  'regression_clause_metrics': summary['regression_clause_metrics'],
+                  'secondary_holdout_clause_metrics': summary['secondary_holdout_clause_metrics'],
+                  'probe_texts_sha256': encoder['reproducibility_probe']['texts_sha256'],
+                  'canonical_probe_sha256': encoder['reproducibility_probe']['canonical_feature_sha256'],
+                  'corpus_unique_texts': encoder['feature_corpus']['unique_texts'],
+                  'canonical_corpus_sha256': encoder['feature_corpus']['canonical_text_feature_sha256'],
+                  'latency_scope': summary['latency_scope'],
+              }
+
+          write_report()
+          try:
+              require(os.environ.get('GITHUB_ACTIONS') == 'true', 'Actions execution required')
+              require(subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == SHA, 'wrong verifier checkout')
+              current = api(f'actions/runs/{RUN}')
+              require(current['head_sha'] == SHA, 'source run head mismatch')
+              require(current['status'] == 'completed' and current['conclusion'] == 'success', 'source run not complete/success')
+              require(current['run_attempt'] == 2, 'source run is not exact attempt 2')
+              artifacts = all_items(f'actions/runs/{RUN}/artifacts', 'artifacts')
+              expected = {
+                  (task, arm, seed)
+                  for task in ('operation', 'schema')
+                  for arm in ARMS
+                  for seed in SEEDS
+              }
+              attempts = {}
+              used_artifacts = set()
+              for attempt in (1, 2):
+                  meta = api(f'actions/runs/{RUN}/attempts/{attempt}')
+                  require(meta['head_sha'] == SHA, f'attempt {attempt} head mismatch')
+                  require(meta['run_attempt'] == attempt, f'attempt {attempt} number mismatch')
+                  require(meta['status'] == 'completed' and meta['conclusion'] == 'success', f'attempt {attempt} failed')
+                  jobs = all_items(f'actions/runs/{RUN}/attempts/{attempt}/jobs', 'jobs')
+                  by_name = {job['name']: job for job in jobs}
+                  wanted = {
+                      'preflight': 'preflight',
+                      'operation': 'experiments (operation)',
+                      'schema': 'experiments (schema)',
+                      'report': 'verify-batch',
+                  }
+                  require(set(by_name) == set(wanted.values()), f'attempt {attempt} source jobs mismatch')
+                  provenance = {'attempt': meta, 'jobs': jobs, 'artifacts': {}}
+                  report['provenance'][str(attempt)] = provenance
+                  for role, job_name in wanted.items():
+                      job = by_name[job_name]
+                      require(job['run_attempt'] == attempt and job['conclusion'] == 'success', f'attempt {attempt}/{role} job mismatch')
+                      if role in ('operation', 'schema'):
+                          artifact_name = f'gdm52-worker-{RUN}-{role}'
+                      elif role == 'report':
+                          artifact_name = f'gdm52-batch-report-{RUN}'
+                      else:
+                          artifact_name = f'gdm52-preflight-{RUN}'
+                      candidates = [
+                          artifact for artifact in artifacts
+                          if artifact['name'] == artifact_name
+                          and job['started_at'] <= artifact['created_at'] <= job['completed_at']
+                      ]
+                      require(len(candidates) == 1, f'attempt {attempt}/{role} artifact provenance ambiguous')
+                      artifact = candidates[0]
+                      require(artifact['id'] == ATTEMPT_IDS[attempt][role], f'attempt {attempt}/{role} artifact id changed')
+                      require(artifact['digest'] == ATTEMPT_DIGESTS[attempt][role], f'attempt {attempt}/{role} digest changed')
+                      require(not artifact['expired'], f'attempt {attempt}/{role} artifact expired')
+                      require(artifact['workflow_run']['id'] == RUN, f'attempt {attempt}/{role} wrong run')
+                      require(artifact['workflow_run']['head_sha'] == SHA, f'attempt {attempt}/{role} wrong head')
+                      require(artifact['id'] not in used_artifacts, 'artifact reused across attempts')
+                      used_artifacts.add(artifact['id'])
+                      provenance['artifacts'][role] = artifact
+                      write_report()
+                      target = ROOT / str(attempt) / ('workers' if role in ('operation', 'schema') else 'other') / role
+                      download(artifact, target)
+
+                  original = load(one(ROOT / str(attempt) / 'other' / 'report', 'BATCH_REPORT.json'))
+                  evidence_flags(original)
+                  tests = one(ROOT / str(attempt) / 'other' / 'preflight', 'tests.log').read_text()
+                  require('Ran 11 tests' in tests and '\nOK' in tests, f'attempt {attempt} preflight tests missing')
+                  smoke = one(ROOT / str(attempt) / 'other' / 'preflight', 'summary.json')
+                  smoke_summary, _ = verify_summary(smoke)
+                  head_contract(smoke_summary['encoder']['head_training_reproducibility'])
+                  cpu_contract(smoke_summary['encoder']['cpu_reproducibility'])
+                  smoke_cal = load(smoke.parent / 'calibration.json')['selected']
+                  require(smoke_cal['threshold_selection'] == 'sequential-status-specific', 'smoke calibration strategy mismatch')
+                  require(isinstance(smoke_cal.get('none_gate_validation_metrics'), dict), 'smoke NONE gate metrics missing')
+                  require(isinstance(smoke_cal.get('ambiguity_gate_validation_metrics'), dict), 'smoke ambiguity gate metrics missing')
+
+                  workers = ROOT / str(attempt) / 'workers'
+                  env = dict(os.environ, GITHUB_SHA=SHA)
+                  with (OUTPUT / f'collector-attempt-{attempt}.log').open('w') as log:
+                      subprocess.run(
+                          ['python', '-m', 'experiments.followup52.collect', str(workers), '--seeds', '5201,5202'],
+                          env=env,
+                          stdout=log,
+                          stderr=subprocess.STDOUT,
+                          check=True,
+                      )
+                  rebuilt = load(workers / 'BATCH_REPORT.json')
+                  evidence_flags(rebuilt)
+                  require(
+                      normalized_batch(original) == normalized_batch(rebuilt),
+                      f'attempt {attempt} original BATCH_REPORT differs from isolated reconstruction',
+                  )
+                  (OUTPUT / f'BATCH_REPORT-attempt-{attempt}.json').write_text(
+                      json.dumps(original, indent=2, sort_keys=True) + '\n'
+                  )
+
+                  entries = {}
+                  for summary_path in workers.rglob('summary.json'):
+                      summary, _ = verify_summary(summary_path)
+                      key = (summary['config']['task'], summary['config']['arm'], int(summary['seed']))
+                      require(key in expected and key not in entries, f'attempt {attempt} duplicate/unexpected result {key}')
+                      require(summary['source_commit'] == SHA, f'attempt {attempt} summary source mismatch')
+                      require(str(summary['run_id']) == str(RUN), f'attempt {attempt} summary run mismatch')
+                      encoder = summary['encoder']
+                      require(encoder['feature_canonicalization']['quantum'] == 1e-4, 'frozen feature quantum changed')
+                      require(encoder['feature_corpus']['unique_texts'] > 0, 'empty frozen feature corpus')
+                      cpu_contract(encoder['cpu_reproducibility'])
+                      head_contract(encoder['head_training_reproducibility'])
+                      validate_checkpoint(summary, summary_path.parent, 'initial')
+                      validate_checkpoint(summary, summary_path.parent, 'selected')
+                      timing = load(summary_path.parent / 'timings.json')
+                      require(len(timing['generation_ms']) == 24, 'timing sample count changed')
+                      require(timing['warmup_requests'] == 2, 'timing warmup contract changed')
+                      require(timing['encoder_calls_measured'] > 0, 'timing encoder-call evidence missing')
+                      require('cached catalog/NONE' in timing['scope'], 'cached-catalog timing scope missing')
+                      require(all(math.isfinite(value) and value > 0 for value in timing['generation_ms']), 'invalid timing sample')
+                      require(summary['regression_examples'] > 0 and summary['secondary_holdout_examples'] == 76, 'example counts invalid')
+                      training = summary['training']
+                      require(training['capability_optimizer_updates'] > 0, 'capability optimizer evidence missing')
+                      require(training['ambiguity_optimizer_updates'] > 0, 'ambiguity optimizer evidence missing')
+                      require(training['selected_capability_hash'] != training['initial_capability_hash'], 'capability head unchanged')
+                      require(training['selected_ambiguity_hash'] != training['initial_ambiguity_hash'], 'ambiguity head unchanged')
+                      calibration = load(summary_path.parent / 'calibration.json')['selected']
+                      strategy = summary['config']['calibration_strategy']
+                      require(calibration['threshold_selection'] == strategy, 'calibration strategy mismatch')
+                      if strategy.startswith('sequential-'):
+                          require(isinstance(calibration.get('none_gate_validation_metrics'), dict), 'NONE gate metrics missing')
+                          require(isinstance(calibration.get('ambiguity_gate_validation_metrics'), dict), 'ambiguity gate metrics missing')
+                          require('accepted + AMBIGUOUS' in calibration.get('hierarchy_contract', ''), 'hierarchy preservation contract missing')
+                      if strategy == 'sequential-status-specific-noninferior':
+                          floor = calibration.get('accepted_status_recall_floor')
+                          require(isinstance(floor, (int, float)), 'accepted-recall floor missing')
+                          require(training['selected_calibration_validation_metrics']['accepted_status_recall'] + 1e-12 >= floor, 'accepted-recall floor violated')
+                      entries[key] = (summary, summary_path.parent)
+                  require(set(entries) == expected, f'attempt {attempt} not exactly twenty verified configurations')
+                  attempts[attempt] = entries
+
+              report['evidence_verified'] = True
+              for key in sorted(expected):
+                  left, left_dir = attempts[1][key]
+                  right, right_dir = attempts[2][key]
+                  left_snapshot = snapshot(left, left_dir)
+                  right_snapshot = snapshot(right, right_dir)
+                  differing = [field for field in left_snapshot if left_snapshot[field] != right_snapshot[field]]
+                  prediction_differences = {}
+                  for split in ('regression', 'holdout'):
+                      left_rows = deterministic_rows(left_dir / f'predictions-{split}.jsonl')
+                      right_rows = deterministic_rows(right_dir / f'predictions-{split}.jsonl')
+                      changed = sorted(
+                          uid for uid in left_rows.keys() | right_rows.keys()
+                          if left_rows.get(uid) != right_rows.get(uid)
+                      )
+                      prediction_differences[split] = changed
+                      if changed:
+                          differing.append(f'predictions-{split}')
+                  raw_features_match = {
+                      'probe': left['encoder']['reproducibility_probe']['raw_feature_sha256'] == right['encoder']['reproducibility_probe']['raw_feature_sha256'],
+                      'corpus': left['encoder']['feature_corpus']['raw_text_feature_sha256'] == right['encoder']['feature_corpus']['raw_text_feature_sha256'],
+                  }
+                  match = not differing
+                  if match:
+                      report['matched_by_task'][key[0]] += 1
+                  report['comparisons'].append({
+                      'task': key[0],
+                      'arm': key[1],
+                      'seed': key[2],
+                      'match': match,
+                      'differing_fields': differing,
+                      'attempt_1': left_snapshot,
+                      'attempt_2': right_snapshot,
+                      'raw_features_match': raw_features_match,
+                      'prediction_difference_ids': prediction_differences,
+                      'timing_attempt_1': left['generation_latency'],
+                      'timing_attempt_2': right['generation_latency'],
+                      'memory_attempt_1': left['memory'],
+                      'memory_attempt_2': right['memory'],
+                  })
+
+              report['complete'] = True
+              report['reproducible'] = all(row['match'] for row in report['comparisons'])
+              report['promotion_eligible'] = (
+                  report['evidence_verified']
+                  and report['reproducible']
+                  and report['matched_by_task'] == report['expected_by_task']
+                  and not report['errors']
+              )
+              write_report()
+              require(report['promotion_eligible'], 'GDM52 exact-attempt reproducibility gate failed')
+              print(json.dumps({
+                  'complete': report['complete'],
+                  'evidence_verified': report['evidence_verified'],
+                  'reproducible': report['reproducible'],
+                  'promotion_eligible': report['promotion_eligible'],
+                  'matched_by_task': report['matched_by_task'],
+                  'errors': report['errors'],
+              }, indent=2, sort_keys=True))
+          except Exception as exc:
+              report['errors'].append({
+                  'type': type(exc).__name__,
+                  'message': str(exc),
+                  'traceback': traceback.format_exc(),
+              })
+              write_report()
+              raise
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm52-reproducibility-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 14
