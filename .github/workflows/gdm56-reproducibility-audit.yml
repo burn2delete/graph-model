@@ -407,7 +407,7 @@ jobs:
                   verify_batch_flags(rebuilt_report)
                   require(normalized_batch(original_report) == normalized_batch(rebuilt_report), f'attempt {attempt} rebuilt BATCH_REPORT differs')
 
-                  summary_paths = sorted(list(root / 'operation').__class__(root / 'operation').rglob('summary.json')) + sorted(list(root / 'schema').__class__(root / 'schema').rglob('summary.json'))
+                  summary_paths = sorted((root / 'operation').rglob('summary.json')) + sorted((root / 'schema').rglob('summary.json'))
                   require(len(summary_paths) == 20, f'attempt {attempt} expected 20 summaries, got {len(summary_paths)}')
                   keyed = {}
                   raw_keyed = {}
