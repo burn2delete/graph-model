@@ -1,0 +1,135 @@
+name: GDM50 float64 parameter-application epoch diagnostic
+on:
+  push:
+    branches: [main]
+    paths:
+      - diagnostics/gdm50_float64_apply_epoch.py
+      - .github/workflows/gdm50-float64-epoch-diagnostic.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm50-head-diagnostic
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  SOURCE_SHA: c84054403c95471f15fb6b6d8363a8f12a0caf4f
+  SOURCE_FOLLOWUP50_TREE: f811d9d758f2bea365b969e14af27864d5bed146
+  SOURCE_WORKFLOW_BLOB: 761004085188edf739f7c14e9efa06f1918e89db
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+jobs:
+  replica:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        replica: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify measured GDM50 source code is unchanged
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD:experiments/followup50)" = "$SOURCE_FOLLOWUP50_TREE"
+          test "$(git hash-object .github/workflows/measured-followup50.yml)" = "$SOURCE_WORKFLOW_BLOB"
+      - name: Install pinned CPU dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip freeze > packages.txt
+      - name: Run full first-epoch candidate
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. GITHUB_ACTIONS=true python diagnostics/gdm50_float64_apply_epoch.py --output "epoch-${REPLICA}.json" 2>&1 | tee "epoch-${REPLICA}.log"
+          test -s "epoch-${REPLICA}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-float64-epoch-${{ github.run_id }}-${{ matrix.replica }}
+          path: |
+            epoch-${{ matrix.replica }}.json
+            epoch-${{ matrix.replica }}.log
+            packages.txt
+          if-no-files-found: error
+          retention-days: 14
+  compare:
+    needs: replica
+    if: always() && needs.replica.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm50-float64-epoch-${{ github.run_id }}-*
+          path: replicas
+      - name: Require exact full-epoch candidate reproducibility
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic-report
+          python - <<'PY' 2>&1 | tee diagnostic-report/compare.log
+          import json
+          from pathlib import Path
+          paths=sorted(Path('replicas').rglob('epoch-*.json'))
+          if len(paths)!=3: raise SystemExit(f'expected 3 replica reports, got {paths}')
+          docs=[json.loads(p.read_text()) for p in paths]
+          for d in docs:
+              assert d['format']=='gdm50-float64-apply-epoch-v1'
+              assert d['source_commit']=='c84054403c95471f15fb6b6d8363a8f12a0caf4f'
+              assert d['task']=='schema' and d['arm']=='null-calibrated' and d['seed']==5001 and d['epoch']==1
+          fields=['dataset_sha256','canonical_feature_probe_sha256','canonical_feature_corpus_sha256','initial_capability_hash','updates']
+          for f in fields:
+              if len({json.dumps(d[f],sort_keys=True) for d in docs})!=1:
+                  raise SystemExit(f'input provenance mismatch for {f}')
+          final=[d['final_capability_hash'] for d in docs]
+          checkpoints=[d['checkpoints'] for d in docs]
+          report={
+              'format':'gdm50-float64-epoch-diagnostic-v1',
+              'source_commit':'c84054403c95471f15fb6b6d8363a8f12a0caf4f',
+              'diagnostic_workflow_commit':'${{ github.sha }}',
+              'complete':True,
+              'replicas':3,
+              'updates':docs[0]['updates'],
+              'initial_capability_hash':docs[0]['initial_capability_hash'],
+              'final_capability_hashes':final,
+              'checkpoint_sequences_exact_match':len({json.dumps(x,sort_keys=True) for x in checkpoints})==1,
+              'final_capability_exact_match':len(set(final))==1,
+              'mean_losses':[d['mean_loss'] for d in docs],
+              'max_gradient_norms':[d['max_gradient_norm'] for d in docs],
+              'candidate_contract':docs[0]['candidate_contract'],
+          }
+          report['candidate_reproducible']=report['checkpoint_sequences_exact_match'] and report['final_capability_exact_match']
+          report['conclusion']='float64 final parameter application is exactly reproducible across the full first epoch on three independent hosted runners' if report['candidate_reproducible'] else 'float64 final parameter application still diverges within the full first epoch'
+          Path('diagnostic-report/FLOAT64_EPOCH_DIAGNOSTIC.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          if not report['candidate_reproducible']: raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm50-float64-epoch-diagnostic-${{ github.run_id }}
+          path: diagnostic-report/
+          if-no-files-found: error
+          retention-days: 14
