@@ -53,6 +53,7 @@ jobs:
           import hashlib
           import json
           import os
+          import shutil
           import stat
           import subprocess
           import traceback
@@ -395,7 +396,7 @@ jobs:
                   for task in ('operation', 'schema'):
                       source_dir = root / task
                       target = collect_root / task
-                      target.symlink_to(source_dir.resolve(), target_is_directory=True)
+                      shutil.copytree(source_dir, target)
                   env = dict(os.environ)
                   env['GITHUB_SHA'] = SHA
                   subprocess.run([
