@@ -23,8 +23,13 @@ env:
   APOLLO_TELEMETRY_DISABLED: 'true'
   HF_HUB_DISABLE_TELEMETRY: '1'
   TOKENIZERS_PARALLELISM: 'false'
-  OMP_NUM_THREADS: '2'
-  MKL_NUM_THREADS: '2'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
   PYTHONUNBUFFERED: '1'
   SEEDS: ${{ inputs.seeds || '5101,5102' }}
 jobs:
@@ -56,14 +61,53 @@ jobs:
       - name: Train and independently verify ambiguity-discriminator smoke policy
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup51.run --backbone hash --task operation --arms ambiguity-linear --seeds 5101 --epochs 2 --output artifacts/smoke --smoke 2>&1 | tee artifacts/smoke.log
+          GITHUB_ACTIONS=true python - --backbone hash --task operation --arms ambiguity-linear --seeds 5101 --epochs 2 --output artifacts/smoke --smoke <<'PY' 2>&1 | tee artifacts/smoke.log
+          import torch
+          from experiments.followup50 import execute as g50exec
+          from experiments.followup50 import execute_deterministic as g50det
+          from experiments.followup51 import run as g51
+          SOURCE='62d2720800f5d98e1521e0200766a80e998ebe9b'
+          g50exec.configure_reproducibility()
+          class Encoder(g50det.ReproducibleEncoder):
+              def __init__(self,*a,**k):
+                  super().__init__(*a,**k)
+                  h=dict(self.meta['head_training_reproducibility'])
+                  h['gdm51_execution_scope']='capability_and_ambiguity_heads'
+                  h['canonical_gdm50_numerical_source_commit']=SOURCE
+                  self.meta=dict(self.meta); self.meta['head_training_reproducibility']=h
+          old_adamw=torch.optim.AdamW; old_clip=torch.nn.utils.clip_grad_norm_; old_enc=g51.Encoder
+          old_nt=torch.set_num_threads; old_ni=torch.set_num_interop_threads
+          torch.optim.AdamW=g50det.HighPrecisionParameterApplyAdamW
+          torch.nn.utils.clip_grad_norm_=g50det.single_tensor_clip_grad_norm_
+          g51.Encoder=Encoder
+          torch.set_num_threads=lambda _n: old_nt(1)
+          def interop(_n):
+              if torch.get_num_interop_threads()!=1: raise RuntimeError('GDM51 reproducibility contract requires one inter-op thread')
+          torch.set_num_interop_threads=interop
+          try: g51.main()
+          finally:
+              torch.optim.AdamW=old_adamw; torch.nn.utils.clip_grad_norm_=old_clip; g51.Encoder=old_enc
+              torch.set_num_threads=old_nt; torch.set_num_interop_threads=old_ni
+          PY
           python - <<'PY'
           from pathlib import Path
+          import json
           from experiments.followup51.collect import verify_summary
           summaries=list(Path('artifacts/smoke').rglob('summary.json'))
           assert len(summaries)==1, summaries
-          verify_summary(summaries[0])
-          print('gdm51 smoke evidence verified')
+          summary=verify_summary(summaries[0])
+          if isinstance(summary,tuple): summary=summary[0]
+          h=summary['encoder']['head_training_reproducibility']
+          assert h['adamw_foreach'] is False and h['adamw_fused'] is False
+          assert h['clip_grad_norm_foreach'] is False
+          assert h['moment_update_dtype']=='float32'
+          assert h['final_parameter_application_dtype']=='float64->float32'
+          assert h['stored_parameter_dtype']=='float32'
+          assert h['feature_quantum_unchanged']==1e-4
+          assert h['numerical_architecture_change'] is True and h['model_objective_changed'] is False
+          assert h['gdm51_execution_scope']=='capability_and_ambiguity_heads'
+          assert h['canonical_gdm50_numerical_source_commit']=='62d2720800f5d98e1521e0200766a80e998ebe9b'
+          print('gdm51 deterministic smoke evidence verified')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
@@ -108,7 +152,34 @@ jobs:
           TASK: ${{ matrix.task }}
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python -m experiments.followup51.run --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          GITHUB_ACTIONS=true python - --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results <<'PY' 2>&1 | tee artifacts/run.log
+          import torch
+          from experiments.followup50 import execute as g50exec
+          from experiments.followup50 import execute_deterministic as g50det
+          from experiments.followup51 import run as g51
+          SOURCE='62d2720800f5d98e1521e0200766a80e998ebe9b'
+          g50exec.configure_reproducibility()
+          class Encoder(g50det.ReproducibleEncoder):
+              def __init__(self,*a,**k):
+                  super().__init__(*a,**k)
+                  h=dict(self.meta['head_training_reproducibility'])
+                  h['gdm51_execution_scope']='capability_and_ambiguity_heads'
+                  h['canonical_gdm50_numerical_source_commit']=SOURCE
+                  self.meta=dict(self.meta); self.meta['head_training_reproducibility']=h
+          old_adamw=torch.optim.AdamW; old_clip=torch.nn.utils.clip_grad_norm_; old_enc=g51.Encoder
+          old_nt=torch.set_num_threads; old_ni=torch.set_num_interop_threads
+          torch.optim.AdamW=g50det.HighPrecisionParameterApplyAdamW
+          torch.nn.utils.clip_grad_norm_=g50det.single_tensor_clip_grad_norm_
+          g51.Encoder=Encoder
+          torch.set_num_threads=lambda _n: old_nt(1)
+          def interop(_n):
+              if torch.get_num_interop_threads()!=1: raise RuntimeError('GDM51 reproducibility contract requires one inter-op thread')
+          torch.set_num_interop_threads=interop
+          try: g51.main()
+          finally:
+              torch.optim.AdamW=old_adamw; torch.nn.utils.clip_grad_norm_=old_clip; g51.Encoder=old_enc
+              torch.set_num_threads=old_nt; torch.set_num_interop_threads=old_ni
+          PY
           test -s artifacts/results/worker.json
       - uses: actions/upload-artifact@v4
         if: always()
