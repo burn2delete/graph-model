@@ -16,6 +16,8 @@ defaults:
     shell: bash
 env:
   SOURCE_SHA: c84054403c95471f15fb6b6d8363a8f12a0caf4f
+  SOURCE_FOLLOWUP50_TREE: f811d9d758f2bea365b969e14af27864d5bed146
+  SOURCE_WORKFLOW_BLOB: 761004085188edf739f7c14e9efa06f1918e89db
   HF_HUB_DISABLE_TELEMETRY: '1'
   TOKENIZERS_PARALLELISM: 'false'
   OMP_NUM_THREADS: '1'
@@ -38,7 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -46,8 +47,9 @@ jobs:
       - name: Verify measured GDM50 source code is unchanged
         run: |
           set -euo pipefail
-          git fetch --depth=1 origin "$SOURCE_SHA"
-          git diff --exit-code "$SOURCE_SHA" -- experiments/followup50 .github/workflows/measured-followup50.yml
+          test "$(git rev-parse HEAD:experiments/followup50)" = "$SOURCE_FOLLOWUP50_TREE"
+          test "$(git hash-object .github/workflows/measured-followup50.yml)" = "$SOURCE_WORKFLOW_BLOB"
+          echo "measured GDM50 source tree matches $SOURCE_SHA"
       - name: Install pinned CPU dependencies
         run: |
           set -euo pipefail
