@@ -1,0 +1,173 @@
+name: GDM53 accepted-recall budget calibration
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/followup53/**
+      - .github/workflows/measured-followup53.yml
+  workflow_dispatch:
+    inputs:
+      seeds:
+        default: '5301,5302'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm53-measured
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  APOLLO_ELV2_LICENSE: accept
+  APOLLO_TELEMETRY_DISABLED: 'true'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+  SEEDS: ${{ inputs.seeds || '5301,5302' }}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Compile and test GDM53 contracts and inherited boundaries
+        run: |
+          set -euo pipefail
+          python -m compileall -q experiments/followup53
+          python -m unittest experiments.followup53.test_followup experiments.followup52.test_followup experiments.followup51.test_followup experiments.followup50.test_cache_repair -v 2>&1 | tee artifacts/tests.log
+      - name: Train and independently verify accepted-recall budget smoke policy
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup53.execute --backbone hash --task operation --arms budget-structured-10pp --seeds 5301 --epochs 2 --output artifacts/smoke 2>&1 | tee artifacts/smoke.log
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from experiments.followup53.collect import verify_summary
+
+          summaries=list(Path('artifacts/smoke').rglob('summary.json'))
+          assert len(summaries)==1, summaries
+          summary=verify_summary(summaries[0])[0]
+          h=summary['encoder']['head_training_reproducibility']
+          assert h['adamw_foreach'] is False and h['adamw_fused'] is False
+          assert h['clip_grad_norm_foreach'] is False
+          assert h['moment_update_dtype']=='float32'
+          assert h['final_parameter_application_dtype']=='float64->float32'
+          assert h['stored_parameter_dtype']=='float32'
+          assert h['feature_quantum_unchanged']==1e-4
+          assert h['gdm53_execution_scope']=='capability_and_ambiguity_heads'
+          assert h['canonical_gdm52_calibration_source_commit']=='f0ca439c3bb567213108b55a3bd56e449425509b'
+          assert h['gdm53_change_scope']=='validation-only accepted-recall budget sensitivity'
+          cal=json.loads((summaries[0].parent/'calibration.json').read_text())['selected']
+          assert cal['threshold_selection']=='accepted-recall-budget'
+          assert cal['accepted_recall_budget_pp']==10
+          assert cal['accepted_status_recall_floor'] <= cal['joint_baseline_validation_metrics']['accepted_status_recall']
+          print('gdm53 deterministic smoke evidence and recall-budget contract verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm53-preflight-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+  experiments:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        task: [operation, schema]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: gdm53-hf-${{ runner.os }}-distilbert-v1
+      - name: Install CPU model dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip freeze > artifacts/packages.txt
+      - name: Train canonical structured heads, calibrate recall budgets, execute GraphQL, compose schemas, and measure
+        env:
+          TASK: ${{ matrix.task }}
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup53.execute --backbone distilbert --task "$TASK" --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          test -s artifacts/results/worker.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm53-worker-${{ github.run_id }}-${{ matrix.task }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3
+  verify-batch:
+    needs: [preflight, experiments]
+    if: always() && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm53-worker-${{ github.run_id }}-*
+          path: collected
+      - name: Independently verify GDM53 evidence and reproduce metrics
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m experiments.followup53.collect collected --seeds "$SEEDS" 2>&1 | tee collection.log
+          test -s collected/BATCH_REPORT.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm53-batch-report-${{ github.run_id }}
+          path: |
+            collected/BATCH_REPORT.json
+            collection.log
+          if-no-files-found: error
+          retention-days: 14
