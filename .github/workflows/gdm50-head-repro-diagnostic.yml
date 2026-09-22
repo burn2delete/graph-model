@@ -61,7 +61,7 @@ jobs:
           REPLICA: ${{ matrix.replica }}
         run: |
           set -euo pipefail
-          GITHUB_ACTIONS=true python diagnostics/gdm50_head_repro_trace.py --output "trace-${REPLICA}.json" 2>&1 | tee "trace-${REPLICA}.log"
+          PYTHONPATH=. GITHUB_ACTIONS=true python diagnostics/gdm50_head_repro_trace.py --output "trace-${REPLICA}.json" 2>&1 | tee "trace-${REPLICA}.log"
           test -s "trace-${REPLICA}.json"
       - uses: actions/upload-artifact@v4
         if: always()
