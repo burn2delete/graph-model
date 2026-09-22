@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - diagnostics/gdm50_head_repro_trace.py
+      - diagnostics/gdm50_head_quantum_scan.py
       - .github/workflows/gdm50-head-repro-diagnostic.yml
   workflow_dispatch:
 permissions:
@@ -63,6 +64,13 @@ jobs:
           set -euo pipefail
           PYTHONPATH=. GITHUB_ACTIONS=true python diagnostics/gdm50_head_repro_trace.py --output "trace-${REPLICA}.json" 2>&1 | tee "trace-${REPLICA}.log"
           test -s "trace-${REPLICA}.json"
+      - name: Scan explicit post-optimizer parameter grids
+        env:
+          REPLICA: ${{ matrix.replica }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=. GITHUB_ACTIONS=true python diagnostics/gdm50_head_quantum_scan.py --output "quantum-${REPLICA}.json" 2>&1 | tee "quantum-${REPLICA}.log"
+          test -s "quantum-${REPLICA}.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,6 +78,8 @@ jobs:
           path: |
             trace-${{ matrix.replica }}.json
             trace-${{ matrix.replica }}.log
+            quantum-${{ matrix.replica }}.json
+            quantum-${{ matrix.replica }}.log
             packages.txt
           if-no-files-found: error
           retention-days: 14
@@ -86,7 +96,7 @@ jobs:
         with:
           pattern: gdm50-head-trace-${{ github.run_id }}-*
           path: traces
-      - name: Identify the first cross-run learned-head divergence
+      - name: Identify first divergence and smallest reproducible parameter grid
         run: |
           set -euo pipefail
           mkdir -p diagnostic-report
@@ -94,18 +104,27 @@ jobs:
           import itertools, json
           from pathlib import Path
 
-          paths=sorted(Path('traces').rglob('trace-*.json'))
-          if len(paths)!=3:
-              raise SystemExit(f'expected 3 traces, got {paths}')
-          docs=[json.loads(p.read_text()) for p in paths]
+          trace_paths=sorted(Path('traces').rglob('trace-*.json'))
+          quantum_paths=sorted(Path('traces').rglob('quantum-*.json'))
+          if len(trace_paths)!=3 or len(quantum_paths)!=3:
+              raise SystemExit(f'expected 3 traces and 3 quantum scans, got {trace_paths} / {quantum_paths}')
+          docs=[json.loads(p.read_text()) for p in trace_paths]
+          qdocs=[json.loads(p.read_text()) for p in quantum_paths]
           for d in docs:
               assert d['format']=='gdm50-head-repro-trace-v1'
+              assert d['source_commit']=='c84054403c95471f15fb6b6d8363a8f12a0caf4f'
+              assert d['task']=='schema' and d['arm']=='null-calibrated' and d['seed']==5001 and d['epoch']==1
+          for d in qdocs:
+              assert d['format']=='gdm50-head-quantum-scan-v1'
               assert d['source_commit']=='c84054403c95471f15fb6b6d8363a8f12a0caf4f'
               assert d['task']=='schema' and d['arm']=='null-calibrated' and d['seed']==5001 and d['epoch']==1
           assert len({d['updates'] for d in docs})==1
           assert len({d['dataset_sha256'] for d in docs})==1
           assert len({d['initial_capability_hash'] for d in docs})==1
           assert len({d['encoder']['reproducibility_probe']['canonical_feature_sha256'] for d in docs})==1
+          assert len({tuple(d['candidate_quanta']) for d in qdocs})==1
+          assert len({d['dataset_sha256'] for d in qdocs})==1
+          assert len({d['canonical_feature_probe_sha256'] for d in qdocs})==1
 
           stage_fields=[
               ('example_identity', ('row_id','clause','positives','source')),
@@ -136,12 +155,32 @@ jobs:
                     'canonical_corpus_match':a['encoder']['feature_corpus']['canonical_text_feature_sha256']==b['encoder']['feature_corpus']['canonical_text_feature_sha256'],
                     'raw_corpus_match':a['encoder']['feature_corpus']['raw_text_feature_sha256']==b['encoder']['feature_corpus']['raw_text_feature_sha256']}
               pair_reports.append(pair)
+              if not pair['canonical_corpus_match']:
+                  raise SystemExit('canonical frozen feature corpus unexpectedly differs')
               if first and (earliest is None or first['step']<earliest['step'] or
                             (first['step']==earliest['step'] and [s for s,_ in stage_fields].index(first['stage'])<[s for s,_ in stage_fields].index(earliest['stage']))):
                   earliest={**first,'replicas':[ia,ib]}
 
+          candidates=qdocs[0]['candidate_quanta']
+          quantum_rows=[]
+          reproducible=[]
+          for q in candidates:
+              records=[]
+              for d in qdocs:
+                  match=next(r for r in d['results'] if float(r['quantum'])==float(q))
+                  records.append(match)
+              hashes=[r['final_capability_hash'] for r in records]
+              initial=[r['initial_capability_hash'] for r in records]
+              assert len(set(initial))==1
+              row={'quantum':q,'final_capability_hashes':hashes,'exact_match':len(set(hashes))==1,
+                   'updates':[r['updates'] for r in records]}
+              quantum_rows.append(row)
+              if row['exact_match']:
+                  reproducible.append(q)
+          smallest=min(reproducible) if reproducible else None
+
           report={
-              'format':'gdm50-head-repro-diagnostic-v1',
+              'format':'gdm50-head-repro-diagnostic-v2',
               'source_commit':'c84054403c95471f15fb6b6d8363a8f12a0caf4f',
               'diagnostic_workflow_commit':'${{ github.sha }}',
               'complete':True,
@@ -151,10 +190,12 @@ jobs:
               'canonical_probe_hash':docs[0]['encoder']['reproducibility_probe']['canonical_feature_sha256'],
               'pair_comparisons':pair_reports,
               'first_observed_divergence':earliest,
+              'parameter_grid_scan':quantum_rows,
+              'smallest_first_epoch_reproducible_quantum':smallest,
               'conclusion':None,
           }
           if earliest is None:
-              report['conclusion']='no cross-run divergence observed in the first schema null-calibrated epoch; diagnostic is inconclusive'
+              report['conclusion']='no cross-run divergence observed in the unmodified first schema null-calibrated epoch; diagnostic is inconclusive'
               report['diagnostic_conclusive']=False
           elif earliest['stage']=='canonical_input':
               report['conclusion']='divergence occurs before the learned head because canonical per-step inputs differ'
@@ -169,14 +210,15 @@ jobs:
               report['conclusion']='forward and backward gradients match; first divergence is gradient clipping/reduction'
               report['diagnostic_conclusive']=True
           elif earliest['stage']=='optimizer_update':
-              report['conclusion']='forward/backward/clipping match; first divergence is AdamW state/parameter update'
+              report['conclusion']='forward/backward/clipping and optimizer state match through the first differing step; first divergence is parameter application in the AdamW update'
               report['diagnostic_conclusive']=True
           else:
               report['conclusion']='state already differs before the current step; inspect the preceding update'
               report['diagnostic_conclusive']=True
+          report['candidate_scan_conclusive']=smallest is not None
           Path('diagnostic-report/HEAD_REPRO_DIAGNOSTIC.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({k:report[k] for k in ('complete','diagnostic_conclusive','first_observed_divergence','conclusion')},indent=2))
-          if not report['diagnostic_conclusive']:
+          print(json.dumps({k:report[k] for k in ('complete','diagnostic_conclusive','first_observed_divergence','smallest_first_epoch_reproducible_quantum','conclusion')},indent=2))
+          if not report['diagnostic_conclusive'] or not report['candidate_scan_conclusive']:
               raise SystemExit(1)
           PY
       - uses: actions/upload-artifact@v4
