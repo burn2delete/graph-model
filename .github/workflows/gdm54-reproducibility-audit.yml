@@ -413,19 +413,29 @@ jobs:
                       require(left['raw_features']['canonical_corpus_sha256'] == right['raw_features']['canonical_corpus_sha256'], 'raw corpus differs without canonical equality')
                   summary1 = left['summary']
                   summary2 = right['summary']
+                  latency1 = summary1['generation_latency']
+                  latency2 = summary2['generation_latency']
+                  memory1 = summary1.get('memory', {}).get('rss_after_evaluation_kib')
+                  memory2 = summary2.get('memory', {}).get('rss_after_evaluation_kib')
+                  require(latency1['p50_ms'] > 0 and latency1['p95_ms'] > 0, 'attempt 1 invalid latency')
+                  require(latency2['p50_ms'] > 0 and latency2['p95_ms'] > 0, 'attempt 2 invalid latency')
+                  require(isinstance(memory1, (int, float)) and memory1 > 0, 'attempt 1 invalid memory evidence')
+                  require(isinstance(memory2, (int, float)) and memory2 > 0, 'attempt 2 invalid memory evidence')
                   report['timing_observations'].append({
                       'task': key[0],
                       'arm': key[1],
                       'seed': key[2],
                       'attempt1': {
-                          'p50_ms': summary1['timing']['p50_ms'],
-                          'p95_ms': summary1['timing']['p95_ms'],
-                          'peak_rss_kib': summary1['timing']['peak_rss_kib'],
+                          'p50_ms': latency1['p50_ms'],
+                          'p95_ms': latency1['p95_ms'],
+                          'rss_after_evaluation_kib': memory1,
+                          'latency_scope': summary1.get('latency_scope'),
                       },
                       'attempt2': {
-                          'p50_ms': summary2['timing']['p50_ms'],
-                          'p95_ms': summary2['timing']['p95_ms'],
-                          'peak_rss_kib': summary2['timing']['peak_rss_kib'],
+                          'p50_ms': latency2['p50_ms'],
+                          'p95_ms': latency2['p95_ms'],
+                          'rss_after_evaluation_kib': memory2,
+                          'latency_scope': summary2.get('latency_scope'),
                       },
                   })
                   comparison = {
