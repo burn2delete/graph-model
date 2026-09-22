@@ -74,7 +74,17 @@ jobs:
           assert contract.get('adamw_foreach') is False, contract
           assert contract.get('adamw_fused') is False, contract
           assert contract.get('clip_grad_norm_foreach') is False, contract
-          print('gdm50 smoke evidence and single-tensor head contract verified')
+          assert contract.get('moment_update_dtype') == 'float32', contract
+          assert contract.get('final_parameter_application_dtype') == 'float64->float32', contract
+          assert contract.get('stored_parameter_dtype') == 'float32', contract
+          assert contract.get('numerical_architecture_change') is True, contract
+          assert contract.get('model_objective_changed') is False, contract
+          assert contract.get('feature_quantum_unchanged') == 1e-4, contract
+          assert contract.get('verified_denominator_drift_diagnostic_run') == 35677485996, contract
+          assert contract.get('verified_full_epoch_candidate_run') == 35677710836, contract
+          assert contract.get('verified_full_epoch_checkpoint_sequences_exact_match') is True, contract
+          assert contract.get('verified_full_epoch_final_capability_exact_match') is True, contract
+          print('gdm50 smoke evidence and high-precision AdamW parameter-application contract verified')
           PY
       - uses: actions/upload-artifact@v4
         if: always()
