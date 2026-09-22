@@ -82,7 +82,11 @@ class GDM55Contracts(unittest.TestCase):
     def test_fresh_holdout_has_four_labeled_ambiguity_families(self):
         rows, refs = run.fresh_holdout("schema")
         ambiguous = [row for row in rows if refs[row["id"]]["status"] == "AMBIGUOUS"]
-        self.assertEqual(len(ambiguous), 8)
+        # g50._dataset deliberately emits both an atomic AMBIGUOUS request and a
+        # composite accepted-clause + AMBIGUOUS request for every ambiguity phrase.
+        # With four families across two fresh domains that is 4 * 2 * 2 = 16 rows,
+        # i.e. four rows per family. These are distinct evaluation cases, not seeds.
+        self.assertEqual(len(ambiguous), 16)
         families = {row.get("ambiguity_family") for row in ambiguous}
         self.assertEqual(
             families,
@@ -91,7 +95,7 @@ class GDM55Contracts(unittest.TestCase):
         counts = {family: 0 for family in families}
         for row in ambiguous:
             counts[row["ambiguity_family"]] += 1
-        self.assertEqual(set(counts.values()), {2})
+        self.assertEqual(set(counts.values()), {4})
 
     def test_holdout_phrases_and_domains_never_enter_curriculum(self):
         public, refs = self._dataset()
