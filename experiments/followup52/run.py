@@ -42,8 +42,6 @@ from experiments.followup51 import run as g51
 FORMAT = "gdm52-measured-v1"
 SEEDS_DEFAULT = "5201,5202"
 
-# The trained-head architectures are intentionally inherited from canonical GDM51.
-# Only validation-only threshold selection differs between paired arms.
 ARMS = {
     "joint-mlp-control": {
         "family": "explicit-none-plus-ambiguity",
@@ -87,8 +85,6 @@ ARMS = {
     },
 }
 
-# New calibration-only language/domains. These are never used for optimizer or
-# checkpoint selection.
 CALIBRATION_LANGUAGE = [
     "primary interface heading for this entity",
     "timestamp when the entity was first committed to durable storage",
@@ -109,9 +105,6 @@ CALIBRATION_AMBIGUOUS = [
     "review person's identity without specifying creator versus moderator",
     "persistence timestamp without specifying initial versus latest write",
 ]
-
-# Fresh GDM52 holdout. It is intentionally disjoint from the inspected
-# Incident/Contract GDM51 holdout and from all prior numbered holdouts.
 HOLDOUT_LANGUAGE = [
     "human-readable heading customers see for this object",
     "instant this object was originally committed to storage",
@@ -133,8 +126,6 @@ HOLDOUT_AMBIGUOUS = [
     "storage event time without specifying first commit or latest rewrite",
 ]
 
-# Workflow-level deterministic execution replaces this alias with the canonical
-# GDM50 reproducible encoder while keeping the model objective unchanged.
 Encoder = g51.Encoder
 
 
@@ -165,63 +156,89 @@ def _hmean(a: float, b: float) -> float:
 
 
 def _none_gate_metrics(records, threshold):
-    accepted_total = accepted_correct = nomatch_total = nomatch_correct = incorrect = 0
+    """Score NONE as NO_MATCH versus all non-NO_MATCH statuses.
+
+    AMBIGUOUS requests must survive the upstream NONE gate or the downstream
+    ambiguity discriminator never gets a chance to classify them. The original
+    GDM52 preflight exposed that hierarchy error before measured training began.
+    """
+    accepted_total = accepted_correct = 0
+    ambiguous_total = ambiguous_preserved = 0
+    non_nomatch_total = non_nomatch_correct = 0
+    nomatch_total = nomatch_correct = false_passes = 0
     for row in records:
         ref = row["reference"]
-        if ref["status"] not in {"accepted", "NO_MATCH"}:
-            continue
-        pred = "NO_MATCH" if any(e["none_margin"] >= threshold for e in row["evidence"]) else "accepted"
-        if ref["status"] == "accepted":
-            accepted_total += 1
-            accepted_correct += int(pred == "accepted")
-        else:
+        predicted_nomatch = any(e["none_margin"] >= threshold for e in row["evidence"])
+        if ref["status"] == "NO_MATCH":
             nomatch_total += 1
-            nomatch_correct += int(pred == "NO_MATCH")
-            incorrect += int(pred == "accepted")
-    ar = accepted_correct / accepted_total if accepted_total else 0.0
-    nr = nomatch_correct / nomatch_total if nomatch_total else 0.0
-    total = accepted_total + nomatch_total
+            nomatch_correct += int(predicted_nomatch)
+            false_passes += int(not predicted_nomatch)
+        else:
+            non_nomatch_total += 1
+            non_nomatch_correct += int(not predicted_nomatch)
+            if ref["status"] == "accepted":
+                accepted_total += 1
+                accepted_correct += int(not predicted_nomatch)
+            elif ref["status"] == "AMBIGUOUS":
+                ambiguous_total += 1
+                ambiguous_preserved += int(not predicted_nomatch)
+    accepted_recall = accepted_correct / accepted_total if accepted_total else 0.0
+    ambiguous_recall = ambiguous_preserved / ambiguous_total if ambiguous_total else 0.0
+    pass_recall = non_nomatch_correct / non_nomatch_total if non_nomatch_total else 0.0
+    nomatch_recall = nomatch_correct / nomatch_total if nomatch_total else 0.0
+    total = non_nomatch_total + nomatch_total
     return {
-        "accepted_status_recall": ar,
-        "nomatch_recall": nr,
-        "binary_hmean": _hmean(ar, nr),
-        "incorrect_publication_rate": incorrect / total if total else 0.0,
+        "accepted_status_recall": accepted_recall,
+        "ambiguity_preservation_recall": ambiguous_recall,
+        "non_nomatch_recall": pass_recall,
+        "nomatch_recall": nomatch_recall,
+        "binary_hmean": _hmean(pass_recall, nomatch_recall),
+        "incorrect_publication_rate": false_passes / total if total else 0.0,
         "accepted_examples": accepted_total,
+        "ambiguous_examples": ambiguous_total,
+        "non_nomatch_examples": non_nomatch_total,
         "nomatch_examples": nomatch_total,
     }
 
 
 def _ambiguity_gate_metrics(records, none_threshold, ambiguity_threshold):
-    accepted_total = accepted_correct = ambiguity_total = ambiguity_correct = incorrect = 0
+    """Score ambiguity only for requests that reach the downstream gate."""
+    accepted_total = accepted_correct = 0
+    ambiguity_total = ambiguity_correct = incorrect = 0
+    upstream_blocked_accepted = upstream_blocked_ambiguous = 0
     for row in records:
         ref = row["reference"]
         if ref["status"] not in {"accepted", "AMBIGUOUS"}:
             continue
-        pred = g51.request_from_evidence(
-            row["evidence"],
-            {
-                "none_margin_threshold": none_threshold,
-                "ambiguity_probability_threshold": ambiguity_threshold,
-            },
-            learned=True,
-        )["status"]
+        blocked = any(e["none_margin"] >= none_threshold for e in row["evidence"])
+        if blocked:
+            if ref["status"] == "accepted":
+                upstream_blocked_accepted += 1
+            else:
+                upstream_blocked_ambiguous += 1
+            continue
+        predicted_ambiguous = any(
+            e["ambiguity_probability"] >= ambiguity_threshold for e in row["evidence"]
+        )
         if ref["status"] == "accepted":
             accepted_total += 1
-            accepted_correct += int(pred == "accepted")
+            accepted_correct += int(not predicted_ambiguous)
         else:
             ambiguity_total += 1
-            ambiguity_correct += int(pred == "AMBIGUOUS")
-            incorrect += int(pred == "accepted")
-    ar = accepted_correct / accepted_total if accepted_total else 0.0
-    rr = ambiguity_correct / ambiguity_total if ambiguity_total else 0.0
+            ambiguity_correct += int(predicted_ambiguous)
+            incorrect += int(not predicted_ambiguous)
+    accepted_recall = accepted_correct / accepted_total if accepted_total else 0.0
+    ambiguity_recall = ambiguity_correct / ambiguity_total if ambiguity_total else 0.0
     total = accepted_total + ambiguity_total
     return {
-        "accepted_status_recall": ar,
-        "ambiguity_recall": rr,
-        "binary_hmean": _hmean(ar, rr),
+        "accepted_status_recall": accepted_recall,
+        "ambiguity_recall": ambiguity_recall,
+        "binary_hmean": _hmean(accepted_recall, ambiguity_recall),
         "incorrect_publication_rate": incorrect / total if total else 0.0,
         "accepted_examples": accepted_total,
         "ambiguity_examples": ambiguity_total,
+        "upstream_blocked_accepted": upstream_blocked_accepted,
+        "upstream_blocked_ambiguous": upstream_blocked_ambiguous,
     }
 
 
@@ -242,6 +259,8 @@ def _select_none_threshold(records, accepted_floor=None, risk_first=False):
             key = (
                 metrics["nomatch_recall"],
                 metrics["binary_hmean"],
+                metrics["non_nomatch_recall"],
+                metrics["ambiguity_preservation_recall"],
                 metrics["accepted_status_recall"],
                 -metrics["incorrect_publication_rate"],
             )
@@ -249,6 +268,8 @@ def _select_none_threshold(records, accepted_floor=None, risk_first=False):
             key = (
                 metrics["binary_hmean"],
                 metrics["nomatch_recall"],
+                metrics["non_nomatch_recall"],
+                metrics["ambiguity_preservation_recall"],
                 metrics["accepted_status_recall"],
                 -metrics["incorrect_publication_rate"],
             )
@@ -263,31 +284,35 @@ def _select_ambiguity_threshold(records, none_threshold, accepted_floor=None, ri
     best = None
     for threshold in _threshold_values(records, "ambiguity_probability"):
         metrics = _ambiguity_gate_metrics(records, none_threshold, threshold)
-        if accepted_floor is not None and metrics["accepted_status_recall"] + 1e-12 < accepted_floor:
+        final_metrics = g51._cal_metrics(records, none_threshold, threshold, True)
+        if accepted_floor is not None and final_metrics["accepted_status_recall"] + 1e-12 < accepted_floor:
             continue
         if risk_first:
             key = (
                 metrics["ambiguity_recall"],
                 metrics["binary_hmean"],
-                metrics["accepted_status_recall"],
-                -metrics["incorrect_publication_rate"],
+                final_metrics["accepted_status_recall"],
+                -final_metrics["incorrect_publication_rate"],
             )
         else:
             key = (
                 metrics["binary_hmean"],
                 metrics["ambiguity_recall"],
-                metrics["accepted_status_recall"],
-                -metrics["incorrect_publication_rate"],
+                final_metrics["accepted_status_recall"],
+                -final_metrics["incorrect_publication_rate"],
             )
         if best is None or key > best[0]:
-            best = (key, float(threshold), metrics)
+            evidence = dict(metrics)
+            evidence["global_accepted_status_recall"] = final_metrics["accepted_status_recall"]
+            evidence["global_exact_accuracy"] = final_metrics["exact_accuracy"]
+            best = (key, float(threshold), evidence)
     if best is None:
         raise RuntimeError("no ambiguity threshold satisfies the accepted-recall constraint")
     return best[1], best[2]
 
 
 def calibrate_records(records, strategy):
-    """Validation-only status calibration over already-computed clause evidence."""
+    """Validation-only hierarchical status calibration over clause evidence."""
     if strategy not in {
         "sequential-status-specific",
         "sequential-status-specific-noninferior",
@@ -298,8 +323,6 @@ def calibrate_records(records, strategy):
     floor = None
     risk_first = strategy.endswith("noninferior")
     if risk_first:
-        # The floor comes from the existing GDM51 joint calibration objective on the
-        # SAME validation/calibration records. No test or holdout labels are used.
         nvals = _threshold_values(records, "none_margin")
         avals = _threshold_values(records, "ambiguity_probability")
         best = None
@@ -337,6 +360,7 @@ def calibrate_records(records, strategy):
         "selection_split": "validation",
         "calibration_scope": "expanded-validation-only",
         "threshold_selection": strategy,
+        "hierarchy_contract": "NONE gate calibrated as NO_MATCH vs non-NO_MATCH (accepted + AMBIGUOUS); ambiguity gate calibrated only on requests surviving NONE",
         "none_gate_validation_metrics": none_metrics,
         "ambiguity_gate_validation_metrics": ambiguity_metrics,
     }
@@ -354,7 +378,6 @@ def calibrate_model(bundle, encoder, arm, rows, refs):
         calibration = dict(calibration)
         calibration["threshold_selection"] = strategy
         return calibration, metrics
-
     records = [
         {
             "reference": refs[row["id"]],
@@ -380,7 +403,7 @@ def run_one(arm_name, task, seed, encoder, public, refs, data_report, compositor
         **arm,
         "model_scope": "frozen pretrained encoder + learned feature-space adapter/head",
         "schema_scope": "catalog projection + deterministic SDL/Federation realization" if task == "schema" else None,
-        "research_question": "can status-specific hierarchical validation calibration preserve GDM51 answerable recall while recovering NO_MATCH and AMBIGUOUS risk accuracy",
+        "research_question": "can hierarchical status-specific validation calibration preserve GDM51 answerable recall while recovering NO_MATCH and AMBIGUOUS risk accuracy",
     }
     write_json(directory / "config.json", config)
     rss_before = current_rss_kib()
@@ -404,7 +427,6 @@ def run_one(arm_name, task, seed, encoder, public, refs, data_report, compositor
     )
     receipt.update(
         {
-            # Retained for inherited independent evidence checks.
             "gdm51_family": arm["family"],
             "gdm52_family": "status-specific-calibration",
             "gdm52_calibration_strategy": arm["calibration_strategy"],
@@ -421,7 +443,6 @@ def run_one(arm_name, task, seed, encoder, public, refs, data_report, compositor
     )
 
     training_ms = (time.perf_counter_ns() - started) / 1e6
-
     base = [row for row in public["test"] if row["task"] == task]
     base_refs = {row["id"]: refs["test"][row["id"]] for row in base}
     regression_rows = list(base)
@@ -543,11 +564,8 @@ def main():
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError("Project execution belongs in GitHub Actions")
 
-    # The measured workflow replaces these historical setters with the canonical
-    # deterministic one-thread contract before main() executes.
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
-
     root = Path(args.output)
     root.mkdir(parents=True, exist_ok=True)
     public, refs, report = corrected_dataset(root / "dataset")
