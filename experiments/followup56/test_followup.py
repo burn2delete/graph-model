@@ -40,9 +40,12 @@ class GDM56Contracts(unittest.TestCase):
     def test_all_arms_match_relation_control_update_budget(self):
         public, refs = self._dataset()
         receipts = {}
-        for name in arm_names():
-            examples = run.ambiguity_curriculum_examples("schema", public, refs, name)
-            receipts[name] = (
+        for arm_name in arm_names():
+            curriculum = run.ARMS[arm_name]["ambiguity_curriculum"]
+            examples = run.ambiguity_curriculum_examples(
+                "schema", public, refs, curriculum
+            )
+            receipts[arm_name] = (
                 len(examples),
                 sum(int(item[2]) == 1 for item in examples),
                 sum(int(item[2]) == 0 for item in examples),
@@ -52,9 +55,12 @@ class GDM56Contracts(unittest.TestCase):
     def test_balanced_arms_equalize_four_positive_relation_families(self):
         public, refs = self._dataset()
         expected = {"role", "lifecycle-time", "representation", "object-vs-supplier"}
-        for name in arm_names()[1:]:
-            examples = run.ambiguity_curriculum_examples("operation", public, refs, name)
-            receipt = run._curriculum_receipt(examples, name)
+        for arm_name in arm_names()[1:]:
+            curriculum = run.ARMS[arm_name]["ambiguity_curriculum"]
+            examples = run.ambiguity_curriculum_examples(
+                "operation", public, refs, curriculum
+            )
+            receipt = run._curriculum_receipt(examples, curriculum)
             counts = receipt["gdm56_positive_family_counts"]
             self.assertEqual(set(counts), expected)
             self.assertGreater(min(counts.values()), 0)
@@ -62,28 +68,34 @@ class GDM56Contracts(unittest.TestCase):
 
     def test_counterfactual_factor_is_isolated(self):
         public, refs = self._dataset()
-        for name in arm_names()[1:]:
-            examples = run.ambiguity_curriculum_examples("operation", public, refs, name)
+        for arm_name in arm_names()[1:]:
+            curriculum = run.ARMS[arm_name]["ambiguity_curriculum"]
+            examples = run.ambiguity_curriculum_examples(
+                "operation", public, refs, curriculum
+            )
             negatives = [item for item in examples if int(item[2]) == 0]
             count = sum("counterfactual" in item[4] for item in negatives)
-            wants = name in {
+            wants = arm_name in {
                 "family-balanced-counterfactual",
                 "family-balanced-counterfactual-domain",
             }
-            self.assertEqual(count > 0, wants, (name, count))
+            self.assertEqual(count > 0, wants, (arm_name, count))
             if wants:
                 self.assertEqual(count, len(negatives) // 4)
 
     def test_domain_factor_is_isolated(self):
         public, refs = self._dataset()
-        for name in arm_names()[1:]:
-            examples = run.ambiguity_curriculum_examples("schema", public, refs, name)
+        for arm_name in arm_names()[1:]:
+            curriculum = run.ARMS[arm_name]["ambiguity_curriculum"]
+            examples = run.ambiguity_curriculum_examples(
+                "schema", public, refs, curriculum
+            )
             domain_count = sum("domain-positive" in item[4] for item in examples)
-            wants = name in {
+            wants = arm_name in {
                 "family-balanced-domain",
                 "family-balanced-counterfactual-domain",
             }
-            self.assertEqual(domain_count > 0, wants, (name, domain_count))
+            self.assertEqual(domain_count > 0, wants, (arm_name, domain_count))
 
     def test_fresh_holdout_has_four_labeled_ambiguity_families(self):
         rows, refs = run.fresh_holdout("schema")
