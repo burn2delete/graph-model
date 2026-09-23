@@ -28,6 +28,7 @@ jobs:
       MKL_CBWR: COMPATIBLE
       ATEN_CPU_CAPABILITY: default
       PYTHONHASHSEED: '0'
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,13 +48,17 @@ jobs:
       - name: Verify isolated attempts and compare all twenty configurations
         run: |
           set -euo pipefail
-          python - <<'PY' 2>&1 | tee audit-output/audit.log
+          python -u - <<'PY' 2>&1 | tee audit-output/audit.log
           import copy
           import datetime as dt
+          import gc
           import hashlib
           import json
           import os
+          import resource
           import shutil
+          import signal
+          import sqlite3
           import stat
           import subprocess
           import traceback
@@ -69,9 +74,23 @@ jobs:
           RUN = int(os.environ['SOURCE_RUN'])
           SHA = os.environ['SOURCE_SHA']
           OUTPUT = Path('audit-output')
-          ROOT = Path('isolated-evidence')
+          SCRATCH = Path('audit-scratch')
           SEEDS = (5801, 5802)
           TASKS = ('operation', 'schema')
+          ARMS = (
+              'top2-pooled-control',
+              'top3-pooled',
+              'top4-pooled',
+              'top5-pooled',
+              'all-pooled',
+          )
+          EXPECTED_TOPK = {
+              'top2-pooled-control': 2,
+              'top3-pooled': 3,
+              'top4-pooled': 4,
+              'top5-pooled': 5,
+              'all-pooled': 'all',
+          }
 
           ATTEMPT_IDS = {
               1: {
@@ -139,12 +158,15 @@ jobs:
               'comparisons': [],
               'timing_observations': [],
               'raw_feature_differences': [],
+              'diagnostics': [],
               'errors': [],
               'scope': 'independent evidence verification only; no model training or architecture experiment',
           }
 
+          OUTPUT.mkdir(parents=True, exist_ok=True)
+          SCRATCH.mkdir(parents=True, exist_ok=True)
+
           def write_report():
-              OUTPUT.mkdir(parents=True, exist_ok=True)
               (OUTPUT / 'REPRODUCIBILITY_REPORT.json').write_text(
                   json.dumps(report, indent=2, sort_keys=True) + '\n'
               )
@@ -161,14 +183,46 @@ jobs:
 
           def file_hash(path):
               h = hashlib.sha256()
-              with path.open('rb') as handle:
+              with Path(path).open('rb') as handle:
                   for block in iter(lambda: handle.read(1024 * 1024), b''):
                       h.update(block)
               return h.hexdigest()
 
+          def rss_kib():
+              status = Path('/proc/self/status')
+              if status.exists():
+                  for line in status.read_text().splitlines():
+                      if line.startswith('VmRSS:'):
+                          return int(line.split()[1])
+              return None
+
+          def diagnostics(phase):
+              usage = shutil.disk_usage('.')
+              row = {
+                  'phase': phase,
+                  'utc': dt.datetime.now(dt.timezone.utc).isoformat(),
+                  'rss_kib': rss_kib(),
+                  'maxrss_kib': int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+                  'disk_free_bytes': usage.free,
+                  'disk_used_bytes': usage.used,
+              }
+              report['diagnostics'].append(row)
+              write_report()
+              print('AUDIT_PHASE ' + json.dumps(row, sort_keys=True), flush=True)
+
+          def terminated(signum, _frame):
+              report['errors'].append(f'SignalTermination: received signal {signum}')
+              diagnostics(f'signal-{signum}')
+              write_report()
+              raise SystemExit(128 + signum)
+
+          signal.signal(signal.SIGTERM, terminated)
+          signal.signal(signal.SIGINT, terminated)
+
           def safe_download(artifact, destination):
               destination.mkdir(parents=True, exist_ok=False)
               zpath = destination.with_suffix('.zip')
+              diagnostics(f'download-start-artifact-{artifact["id"]}')
               with zpath.open('wb') as handle:
                   subprocess.run(
                       ['gh', 'api', f'repos/{REPO}/actions/artifacts/{artifact["id"]}/zip'],
@@ -184,7 +238,8 @@ jobs:
                       require('..' not in p.parts and '\\' not in item.filename, 'unsafe archive path rejected')
                       require(not stat.S_ISLNK(item.external_attr >> 16), 'archive symlink rejected')
                   archive.extractall(destination)
-              return zpath
+              zpath.unlink()
+              diagnostics(f'download-extracted-artifact-{artifact["id"]}')
 
           def load(path):
               return json.loads(Path(path).read_text())
@@ -207,19 +262,61 @@ jobs:
               )
               return out
 
-          def deterministic_rows(path):
-              rows = {}
-              for line in Path(path).read_text().splitlines():
-                  if not line.strip():
-                      continue
-                  row = json.loads(line)
-                  uid = row['id']
-                  require(uid not in rows, 'duplicate prediction id ' + uid)
-                  composition = row.get('judgment', {}).get('composition')
-                  if isinstance(composition, dict):
-                      composition.pop('elapsed_ms', None)
-                  rows[uid] = row
-              return rows
+          def normalized_prediction(line):
+              row = json.loads(line)
+              uid = row['id']
+              composition = row.get('judgment', {}).get('composition')
+              if isinstance(composition, dict):
+                  composition.pop('elapsed_ms', None)
+              payload = json.dumps(row, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+              return uid, payload
+
+          DB = SCRATCH / 'baseline-predictions.sqlite3'
+          conn = sqlite3.connect(DB)
+          conn.execute('PRAGMA journal_mode=WAL')
+          conn.execute('PRAGMA synchronous=NORMAL')
+          conn.execute('CREATE TABLE predictions (cfg TEXT NOT NULL, split TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(cfg, split, id)) WITHOUT ROWID')
+
+          def store_predictions(cfg, split, path):
+              count = 0
+              with Path(path).open() as handle:
+                  for line in handle:
+                      if not line.strip():
+                          continue
+                      uid, payload = normalized_prediction(line)
+                      try:
+                          conn.execute(
+                              'INSERT INTO predictions(cfg, split, id, payload) VALUES (?, ?, ?, ?)',
+                              (cfg, split, uid, payload),
+                          )
+                      except sqlite3.IntegrityError as exc:
+                          raise AssertionError(f'duplicate prediction id {cfg}/{split}/{uid}') from exc
+                      count += 1
+              conn.commit()
+              return count
+
+          def compare_predictions(cfg, split, path):
+              expected = conn.execute(
+                  'SELECT COUNT(*) FROM predictions WHERE cfg=? AND split=?', (cfg, split)
+              ).fetchone()[0]
+              seen = set()
+              count = 0
+              with Path(path).open() as handle:
+                  for line in handle:
+                      if not line.strip():
+                          continue
+                      uid, payload = normalized_prediction(line)
+                      require(uid not in seen, f'duplicate prediction id {cfg}/{split}/{uid}')
+                      seen.add(uid)
+                      row = conn.execute(
+                          'SELECT payload FROM predictions WHERE cfg=? AND split=? AND id=?',
+                          (cfg, split, uid),
+                      ).fetchone()
+                      require(row is not None, f'unexpected prediction id {cfg}/{split}/{uid}')
+                      require(row[0] == payload, f'prediction mismatch {cfg}/{split}/{uid}')
+                      count += 1
+              require(count == expected, f'prediction count mismatch {cfg}/{split}: {count} != {expected}')
+              return count
 
           def substate_hash(state, prefix):
               sub = {
@@ -232,9 +329,10 @@ jobs:
 
           def validate_checkpoint(summary, directory, phase):
               training = summary['training']
-              state = torch.load(
+              payload = torch.load(
                   Path(directory) / f'{phase}.pt', map_location='cpu', weights_only=True
-              )['state']
+              )
+              state = payload['state']
               require(state_hash(state) == training[f'{phase}_state_hash'], f'{phase} full-state hash mismatch')
               require(
                   substate_hash(state, 'capability.') == training[f'{phase}_capability_hash'],
@@ -244,6 +342,8 @@ jobs:
                   substate_hash(state, 'ambiguity.') == training[f'{phase}_ambiguity_hash'],
                   f'{phase} ambiguity hash mismatch',
               )
+              del state, payload
+              gc.collect()
 
           def verify_batch_flags(doc):
               require(doc.get('format') == 'gdm58-batch-report-v1', 'wrong batch report format')
@@ -302,8 +402,6 @@ jobs:
                   'canonical_probe_sha256': probe['canonical_feature_sha256'],
                   'canonical_corpus_sha256': corpus['canonical_text_feature_sha256'],
                   'corpus_unique_texts': corpus['unique_texts'],
-                  'predictions_regression': deterministic_rows(Path(directory) / 'predictions-regression.jsonl'),
-                  'predictions_holdout': deterministic_rows(Path(directory) / 'predictions-holdout.jsonl'),
               }
 
           def raw_feature_snapshot(summary):
@@ -336,6 +434,26 @@ jobs:
               require(training.get('gdm56_ambiguity_curriculum') == 'family-balanced', 'fixed family-balanced curriculum missing')
               require(float(training.get('gdm56_counterfactual_negative_fraction', -1)) == 0.0, 'counterfactual negatives leaked into smoke')
 
+          def measured_contract(summary):
+              cfg = summary['config']
+              training = summary['training']
+              arm = cfg['arm']
+              require(arm in ARMS, 'unexpected arm')
+              require(cfg.get('backbone') == 'distilbert', 'unexpected measured backbone')
+              require(int(training.get('gdm58_ambiguity_feature_dim', -1)) == 7691, 'measured ambiguity dimension not matched')
+              require(training.get('gdm58_family') == 'top-k-pooled-semantic-ambiguity-evidence', 'missing measured GDM58 family')
+              require(training.get('gdm58_representation_mode') == arm, 'representation mode mismatch')
+              require(training.get('gdm58_requested_topk') == EXPECTED_TOPK[arm], 'top-k receipt mismatch')
+              require(training.get('gdm58_pooling_order_invariant') is True, 'measured order-invariant pooling receipt missing')
+              require('weighted-mean' in str(training.get('gdm58_semantic_pooling', '')), 'measured pooling receipt missing')
+              require(training.get('gdm56_ambiguity_curriculum') == 'family-balanced', 'fixed family-balanced curriculum missing')
+              require(float(training.get('gdm56_counterfactual_negative_fraction', -1)) == 0.0, 'counterfactual negatives leaked into measured run')
+              require(training['initial_state_hash'] != training['selected_state_hash'], 'full checkpoint did not change')
+              require(training['initial_capability_hash'] != training['selected_capability_hash'], 'capability checkpoint did not change')
+              require(training['initial_ambiguity_hash'] != training['selected_ambiguity_hash'], 'ambiguity checkpoint did not change')
+              require(int(training['selected_capability_optimizer_updates']) > 0, 'capability optimizer update count missing')
+              require(int(training['selected_ambiguity_optimizer_updates']) > 0, 'ambiguity optimizer update count missing')
+
           def artifact_and_job(attempt, kind):
               artifact = api(f'actions/artifacts/{ATTEMPT_IDS[attempt][kind]}')
               job = api(f'actions/jobs/{ATTEMPT_JOBS[attempt][kind]}')
@@ -354,43 +472,56 @@ jobs:
               require(started - dt.timedelta(minutes=1) <= created <= completed + dt.timedelta(minutes=2), 'artifact creation outside job window')
               return artifact, job
 
-          try:
-              source_run = api(f'actions/runs/{RUN}')
-              require(source_run.get('head_sha') == SHA, 'source run head SHA mismatch')
-              require(source_run.get('run_attempt') == 2, 'source run latest attempt is not attempt 2')
-              require(source_run.get('status') == 'completed' and source_run.get('conclusion') == 'success', 'source run not successful')
+          def hardlink_tree(source, target):
+              shutil.copytree(source, target, copy_function=os.link)
 
-              attempts = {}
-              for attempt in (1, 2):
-                  attempt_root = ROOT / f'attempt-{attempt}'
-                  attempt_root.mkdir(parents=True, exist_ok=False)
-                  provenance = {}
-                  extracted = {}
-                  for kind in ('preflight', 'operation', 'schema', 'report'):
-                      artifact, job = artifact_and_job(attempt, kind)
-                      destination = attempt_root / f'{kind}-artifact'
-                      safe_download(artifact, destination)
-                      extracted[kind] = destination
-                      provenance[kind] = {
-                          'artifact_id': artifact['id'],
-                          'artifact_name': artifact['name'],
-                          'artifact_digest': artifact['digest'],
-                          'artifact_created_at': artifact['created_at'],
-                          'job_id': job['id'],
-                          'job_started_at': job['started_at'],
-                          'job_completed_at': job['completed_at'],
-                      }
+          def helper_self_test():
+              test = SCRATCH / 'self-test'
+              test.mkdir()
+              left = test / 'left.jsonl'
+              right = test / 'right.jsonl'
+              left.write_text('{"id":"b","judgment":{"composition":{"elapsed_ms":1,"ok":true}}}\n{"id":"a","x":2}\n')
+              right.write_text('{"id":"a","x":2}\n{"id":"b","judgment":{"composition":{"elapsed_ms":999,"ok":true}}}\n')
+              store_predictions('self', 'x', left)
+              require(compare_predictions('self', 'x', right) == 2, 'disk-backed prediction self-test failed')
+              shutil.rmtree(test)
+              diagnostics('helper-self-test-passed')
+
+          baseline = {}
+
+          def process_attempt(attempt):
+              diagnostics(f'attempt-{attempt}-start')
+              attempt_root = SCRATCH / f'attempt-{attempt}'
+              attempt_root.mkdir(parents=True, exist_ok=False)
+              provenance = {}
+              extracted = {}
+              for kind in ('preflight', 'operation', 'schema', 'report'):
+                  artifact, job = artifact_and_job(attempt, kind)
+                  destination = attempt_root / f'{kind}-artifact'
+                  safe_download(artifact, destination)
+                  extracted[kind] = destination
+                  provenance[kind] = {
+                      'artifact_id': artifact['id'],
+                      'artifact_name': artifact['name'],
+                      'artifact_digest': artifact['digest'],
+                      'artifact_created_at': artifact['created_at'],
+                      'job_id': job['id'],
+                      'job_started_at': job['started_at'],
+                      'job_completed_at': job['completed_at'],
+                  }
                   report['provenance'][str(attempt)] = provenance
+                  write_report()
 
-                  preflight_contract(extracted['preflight'])
+              preflight_contract(extracted['preflight'])
+              diagnostics(f'attempt-{attempt}-preflight-verified')
 
-                  collected = attempt_root / 'collected'
-                  collected.mkdir()
-                  shutil.copytree(extracted['operation'], collected / 'operation')
-                  shutil.copytree(extracted['schema'], collected / 'schema')
-
-                  env = os.environ.copy()
-                  env['GITHUB_SHA'] = SHA
+              collected = attempt_root / 'collected'
+              collected.mkdir()
+              hardlink_tree(extracted['operation'], collected / 'operation')
+              hardlink_tree(extracted['schema'], collected / 'schema')
+              env = os.environ.copy()
+              env['GITHUB_SHA'] = SHA
+              with (OUTPUT / f'collector-attempt-{attempt}.log').open('w') as log:
                   subprocess.run(
                       [
                           'python', '-m', 'experiments.followup58.collect', str(collected),
@@ -398,106 +529,128 @@ jobs:
                       ],
                       check=True,
                       env=env,
-                      stdout=(attempt_root / 'collector-rebuild.log').open('w'),
+                      stdout=log,
                       stderr=subprocess.STDOUT,
                   )
+              rebuilt = load(collected / 'BATCH_REPORT.json')
+              original = load(one(extracted['report'], 'BATCH_REPORT.json'))
+              verify_batch_flags(original)
+              verify_batch_flags(rebuilt)
+              require(normalized_batch(original) == normalized_batch(rebuilt), 'original/rebuilt BATCH_REPORT mismatch')
+              diagnostics(f'attempt-{attempt}-batch-rebuilt-equal')
 
-                  rebuilt = load(collected / 'BATCH_REPORT.json')
-                  original = load(one(extracted['report'], 'BATCH_REPORT.json'))
-                  verify_batch_flags(original)
-                  verify_batch_flags(rebuilt)
-                  require(normalized_batch(original) == normalized_batch(rebuilt), 'original/rebuilt BATCH_REPORT mismatch')
+              keys = set()
+              for task in TASKS:
+                  summary_paths = sorted((collected / task).rglob('summary.json'))
+                  require(len(summary_paths) == 10, f'{task} expected 10 summaries, got {len(summary_paths)}')
+                  for path in summary_paths:
+                      summary, _ = verify_summary(path)
+                      cfg = summary['config']
+                      task_name = cfg.get('task', task)
+                      arm = cfg['arm']
+                      seed = int(summary['seed'])
+                      require(task_name == task, 'summary task/path mismatch')
+                      require(seed in SEEDS, 'unexpected seed')
+                      require(summary.get('source_commit') == SHA, 'summary source commit mismatch')
+                      measured_contract(summary)
+                      validate_checkpoint(summary, path.parent, 'initial')
+                      validate_checkpoint(summary, path.parent, 'selected')
+                      key = (task, arm, seed)
+                      require(key not in keys, 'duplicate measured config')
+                      keys.add(key)
+                      cfg_key = f'{task}|{arm}|{seed}'
+                      snapshot = deterministic_snapshot(summary, path.parent)
+                      raw = raw_feature_snapshot(summary)
+                      timing = {
+                          'generation_latency': summary['generation_latency'],
+                          'rss_after_evaluation_kib': summary['memory']['rss_after_evaluation_kib'],
+                      }
+                      regression_path = Path(path.parent) / 'predictions-regression.jsonl'
+                      holdout_path = Path(path.parent) / 'predictions-holdout.jsonl'
 
-                  summaries = {}
-                  for task in TASKS:
-                      summary_paths = sorted((collected / task).rglob('summary.json'))
-                      require(len(summary_paths) == 10, f'{task} expected 10 summaries, got {len(summary_paths)}')
-                      for path in summary_paths:
-                          summary, _ = verify_summary(path)
-                          cfg = summary['config']
-                          task_name = cfg.get('task', task)
-                          arm = cfg['arm']
-                          seed = int(summary['seed'])
-                          require(task_name == task, 'summary task/path mismatch')
-                          require(seed in SEEDS, 'unexpected seed')
-                          require(cfg.get('backbone') == 'distilbert', 'unexpected measured backbone')
-                          require(int(summary['training']['gdm58_ambiguity_feature_dim']) == 7691, 'measured ambiguity dimension not matched')
-                          validate_checkpoint(summary, path.parent, 'initial')
-                          validate_checkpoint(summary, path.parent, 'selected')
-                          key = (task, arm, seed)
-                          require(key not in summaries, 'duplicate measured config')
-                          summaries[key] = {
-                              'snapshot': deterministic_snapshot(summary, path.parent),
-                              'raw_features': raw_feature_snapshot(summary),
-                              'timing': {
-                                  'generation_latency': summary['generation_latency'],
-                                  'rss_after_evaluation_kib': summary['memory']['rss_after_evaluation_kib'],
-                              },
-                          }
-                  require(len(summaries) == 20, f'attempt {attempt} did not contain 20 measured summaries')
-                  attempts[attempt] = summaries
+                      if attempt == 1:
+                          baseline[key] = {'snapshot': snapshot, 'raw_features': raw}
+                          store_predictions(cfg_key, 'regression', regression_path)
+                          store_predictions(cfg_key, 'holdout', holdout_path)
+                      else:
+                          require(key in baseline, 'attempt 2 config missing from attempt 1')
+                          left = baseline[key]
+                          differing_fields = [
+                              field for field in sorted(set(left['snapshot']) | set(snapshot))
+                              if left['snapshot'].get(field) != snapshot.get(field)
+                          ]
+                          raw_differences = [
+                              field for field in sorted(set(left['raw_features']) | set(raw))
+                              if left['raw_features'].get(field) != raw.get(field)
+                          ]
+                          if raw_differences:
+                              require(
+                                  left['raw_features']['canonical_probe_sha256'] == raw['canonical_probe_sha256']
+                                  and left['raw_features']['canonical_corpus_sha256'] == raw['canonical_corpus_sha256'],
+                                  'raw feature drift without canonical feature equality',
+                              )
+                              report['raw_feature_differences'].append({
+                                  'task': task, 'arm': arm, 'seed': seed, 'fields': raw_differences,
+                              })
+                          compare_predictions(cfg_key, 'regression', regression_path)
+                          compare_predictions(cfg_key, 'holdout', holdout_path)
+                          exact = not differing_fields
+                          report['comparisons'].append({
+                              'task': task,
+                              'arm': arm,
+                              'seed': seed,
+                              'exact_match': exact,
+                              'differing_fields': differing_fields,
+                              'raw_feature_differences': raw_differences,
+                          })
+                          report['timing_observations'].append({
+                              'task': task,
+                              'arm': arm,
+                              'seed': seed,
+                              'attempt_1': None,
+                              'attempt_2': timing,
+                          })
+                          if exact:
+                              report['matched_by_task'][task] += 1
+                          write_report()
+                      print(f'CONFIG_VERIFIED attempt={attempt} task={task} arm={arm} seed={seed}', flush=True)
+                      gc.collect()
 
-              keys1 = set(attempts[1])
-              keys2 = set(attempts[2])
-              require(keys1 == keys2 and len(keys1) == 20, 'attempt configuration sets differ')
+              require(len(keys) == 20, f'attempt {attempt} did not contain 20 measured summaries')
+              if attempt == 1:
+                  require(len(baseline) == 20, 'attempt 1 baseline did not contain 20 configs')
+              shutil.rmtree(attempt_root)
+              gc.collect()
+              diagnostics(f'attempt-{attempt}-complete-cleaned')
 
-              for key in sorted(keys1):
-                  task, arm, seed = key
-                  left = attempts[1][key]
-                  right = attempts[2][key]
-                  differing_fields = []
-                  all_fields = sorted(set(left['snapshot']) | set(right['snapshot']))
-                  for field in all_fields:
-                      if left['snapshot'].get(field) != right['snapshot'].get(field):
-                          differing_fields.append(field)
-                  exact = not differing_fields
-
-                  raw_differences = [
-                      field for field in sorted(set(left['raw_features']) | set(right['raw_features']))
-                      if left['raw_features'].get(field) != right['raw_features'].get(field)
-                  ]
-                  if raw_differences:
-                      require(
-                          left['raw_features']['canonical_probe_sha256'] == right['raw_features']['canonical_probe_sha256']
-                          and left['raw_features']['canonical_corpus_sha256'] == right['raw_features']['canonical_corpus_sha256'],
-                          'raw feature drift without canonical feature equality',
-                      )
-                      report['raw_feature_differences'].append({
-                          'task': task, 'arm': arm, 'seed': seed, 'fields': raw_differences,
-                      })
-
-                  report['comparisons'].append({
-                      'task': task,
-                      'arm': arm,
-                      'seed': seed,
-                      'exact_match': exact,
-                      'differing_fields': differing_fields,
-                      'raw_feature_differences': raw_differences,
-                  })
-                  report['timing_observations'].append({
-                      'task': task,
-                      'arm': arm,
-                      'seed': seed,
-                      'attempt_1': left['timing'],
-                      'attempt_2': right['timing'],
-                  })
-                  if exact:
-                      report['matched_by_task'][task] += 1
-
+          try:
+              diagnostics('audit-start')
+              source_run = api(f'actions/runs/{RUN}')
+              require(source_run.get('head_sha') == SHA, 'source run head SHA mismatch')
+              require(source_run.get('run_attempt') == 2, 'source run latest attempt is not attempt 2')
+              require(source_run.get('status') == 'completed' and source_run.get('conclusion') == 'success', 'source run not successful')
+              helper_self_test()
+              process_attempt(1)
+              process_attempt(2)
+              require(len(report['comparisons']) == 20, 'comparison count is not 20')
               require(all(row['exact_match'] for row in report['comparisons']), 'deterministic attempt mismatch')
               require(report['matched_by_task'] == report['expected_by_task'], 'not all task configurations matched')
               report['complete'] = True
               report['evidence_verified'] = True
               report['reproducible'] = True
               report['promotion_eligible'] = True
+              diagnostics('audit-passed')
           except Exception as exc:
               report['errors'].append(f'{type(exc).__name__}: {exc}')
               traceback.print_exc()
+              diagnostics('audit-failed')
               write_report()
               raise
+          finally:
+              conn.close()
 
           write_report()
-          print(json.dumps(report, indent=2, sort_keys=True))
+          print(json.dumps(report, indent=2, sort_keys=True), flush=True)
           PY
       - name: Upload reproducibility audit
         if: always()
@@ -507,3 +660,4 @@ jobs:
           path: audit-output/
           if-no-files-found: error
           retention-days: 14
+          compression-level: 6
