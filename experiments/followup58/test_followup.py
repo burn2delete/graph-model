@@ -87,8 +87,12 @@ class GDM58Contracts(unittest.TestCase):
 
         perm = torch.tensor([2, 0, 1])
         candidate2, request2 = run._pooled_blocks(q, candidates[perm], weights[perm])
-        self.assertTrue(torch.equal(candidate, candidate2))
-        self.assertTrue(torch.equal(request, request2))
+        # Floating-point reductions are mathematically permutation invariant but may
+        # differ by a final rounding bit when the reduction order changes. The
+        # architecture contract is semantic/order invariance, not bitwise equality
+        # across a deliberately permuted reduction order.
+        torch.testing.assert_close(candidate, candidate2, rtol=1e-6, atol=1e-7)
+        torch.testing.assert_close(request, request2, rtol=1e-6, atol=1e-7)
 
     def test_more_candidates_can_change_pooled_evidence_without_changing_dimension(self):
         q = torch.tensor([0.1, -0.2])
