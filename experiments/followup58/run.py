@@ -343,7 +343,7 @@ def _postprocess(root):
             "disjoint Notebook/Dispatch calibration-only cases; never used for optimizer updates or checkpoint selection"
         )
         summary["secondary_holdout_scope"] = (
-            "new GDM58 Entitlement/Workbook synthetic holdout; never used for optimizer/checkpoint/representation/calibration selection"
+            "new GDM58 Entitlement/Workbook synthetic holdout; never used for optimizer/checkpoint/calibration selection or representation design"
         )
         summary["regression_scope"] = "corrected public test plus inspected GDM46-GDM57 holdouts"
         summary["secondary_holdout_ambiguity_family_metrics"] = g55._ambiguity_family_metrics(
