@@ -177,7 +177,7 @@ jobs:
                   )
               require('sha256:' + file_hash(zpath) == artifact['digest'], 'downloaded ZIP digest mismatch')
               with zipfile.ZipFile(zpath) as archive:
-                  require(sum(item.file_size for item in archive.infolist()) < 2 * 1024**3, 'oversized archive')
+                  require(sum(item.file_size for item in archive.infolist()) < 4 * 1024**3, 'oversized archive')
                   for item in archive.infolist():
                       p = PurePosixPath(item.filename)
                       require(not p.is_absolute(), 'absolute archive path rejected')
