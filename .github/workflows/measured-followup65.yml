@@ -1,0 +1,187 @@
+name: GDM65 structured schema-relation operation evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/measured-followup65.yml
+  workflow_dispatch:
+    inputs:
+      seeds:
+        default: '6501,6502'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm65-measured
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  APOLLO_ELV2_LICENSE: accept
+  APOLLO_TELEMETRY_DISABLED: 'true'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+  SEEDS: ${{ inputs.seeds || '6501,6502' }}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" ;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Compile and test GDM65 operation-only structured relation contracts
+        run: |
+          set -euo pipefail
+          python -m compileall -q experiments/followup65
+          python -m unittest experiments.followup65.test_followup experiments.followup64.test_followup experiments.followup63.test_followup experiments.followup62.test_followup experiments.followup61.test_followup experiments.followup60.test_followup experiments.followup59.test_followup experiments.followup58.test_followup experiments.followup57.test_followup experiments.followup56.test_followup experiments.followup55.test_followup experiments.followup54.test_followup experiments.followup53.test_followup experiments.followup52.test_followup experiments.followup51.test_followup experiments.followup50.test_cache_repair -v 2>&1 | tee artifacts/tests.log
+      - name: Train and independently verify structured relation smoke policy
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup65.execute --backbone hash --task operation --arms structured-hybrid-relation --seeds 6501 --epochs 2 --output artifacts/smoke 2>&1 | tee artifacts/smoke.log
+          python -m experiments.followup65.collect artifacts/smoke --seeds 6501 --tasks operation 2>&1 | tee artifacts/smoke-collect.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from experiments.followup65 import run
+          summaries=list(Path('artifacts/smoke').rglob('summary.json'))
+          assert len(summaries)==1, summaries
+          s=json.loads(summaries[0].read_text())
+          assert s['config']['task']=='operation'
+          assert s['config']['forward_scope']=='operation-generation-only'
+          assert s['config']['schema_generation']=='suspended-frozen'
+          assert s['config']['ambiguity_representation_mode']=='structured-hybrid-relation'
+          assert s['config']['ambiguity_feature_dim']==1311
+          assert s['config']['ambiguity_relation_feature_count']==20
+          tr=s['training']
+          assert tr['gdm65_base_feature_dim']==1291
+          assert tr['gdm65_relation_feature_count']==20
+          assert tr['gdm65_ambiguity_feature_dim']==1311
+          assert tr['gdm65_base_semantics']=='exact canonical ranked top5 q*ci + abs(q-ci)'
+          assert tr['gdm65_relation_request_independent'] is True
+          assert tr['gdm65_missing_rank_relation_zero_padding'] is True
+          assert tr['canonical_gdm64_source_commit']==run.CANONICAL_GDM64_SOURCE
+          assert tr['canonical_gdm64_audit_run']==run.CANONICAL_GDM64_AUDIT_RUN
+          assert tr['gdm56_ambiguity_curriculum']=='family-balanced'
+          assert tr['gdm56_counterfactual_negative_fraction']==0.0
+          h=s['encoder']['head_training_reproducibility']
+          assert h['feature_quantum_unchanged']==1e-4
+          assert h['adamw_foreach'] is False and h['adamw_fused'] is False
+          report=json.loads(Path('artifacts/smoke/BATCH_REPORT.json').read_text())
+          assert report['complete'] and report['verified']
+          assert report['expected_results']==1 and report['verified_results']==1
+          assert report['schema_configs_compared']==0
+          print('gdm65 deterministic operation-only structured relation smoke verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm65-preflight-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+  operation:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: gdm57-hf-${{ runner.os }}-distilbert-v1
+      - name: Install CPU model dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" ;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip freeze > artifacts/packages.txt
+      - name: Train structured relation ambiguity heads and execute operations
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup65.execute --backbone distilbert --task operation --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          test -s artifacts/results/worker.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm65-worker-${{ github.run_id }}-operation
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3
+  verify-batch:
+    needs: [preflight, operation]
+    if: always() && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm65-worker-${{ github.run_id }}-operation
+          path: collected
+      - name: Independently verify GDM65 operation evidence
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m experiments.followup65.collect collected --seeds "$SEEDS" --tasks operation 2>&1 | tee collection.log
+          test -s collected/BATCH_REPORT.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('collected/BATCH_REPORT.json').read_text())
+          assert r['format']=='gdm65-operation-batch-report-v1'
+          assert r['forward_scope']=='operation-generation-only'
+          assert r['schema_configs_compared']==0
+          assert r['complete'] and r['verified']
+          assert r['expected_results']==10 and r['verified_results']==10
+          assert not r['missing_results'] and not r['unexpected_results'] and not r['failed_results']
+          print('gdm65 operation-only 10/10 independent batch verification passed')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm65-operation-batch-report-${{ github.run_id }}
+          path: |
+            collected/BATCH_REPORT.json
+            collection.log
+          if-no-files-found: error
+          retention-days: 14
