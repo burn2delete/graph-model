@@ -18,15 +18,15 @@ Read [`experiments/MEASUREMENT_POLICY.md`](experiments/MEASUREMENT_POLICY.md) an
 
 ## Current research state
 
-_Last synchronized: 2026-09-24. Latest canonical experiment: GDM61. Forward scope: operation generation only._
+_Last synchronized: 2026-09-24. Latest canonical experiment: GDM62. Forward scope: operation generation only._
 
 | State | Meaning |
 | --- | --- |
-| **Canonical through GDM61** | GDM50–GDM61 each have repeated measured evidence plus a passing exact-attempt reproducibility audit. Canonical means reproducible usable evidence under the declared contract, not automatic architecture victory. |
+| **Canonical through GDM62** | GDM50–GDM61 retain their historical measured evidence/audits; GDM62 is the first post-suspension promotion under the operation-only gate. Canonical means reproducible usable evidence under the declared contract, not automatic architecture victory. |
 | **Forward task** | Generate an executable GraphQL operation from an intent and provided schema/catalog, while correctly handling answerable, NO_MATCH, and AMBIGUOUS requests. |
 | **Schema generation** | **Suspended/frozen.** GDM41–61 schema evidence remains historical provenance only. No new schema arms are launched, scored, optimized, audited for promotion, or used to pick forward architecture. |
-| **Latest supported operation result** | GDM61 is negative/inconclusive for fixed product/delta rescaling. Product-dominant raises answerable accuracy/recall but loses risk/publication/AMBIGUOUS safety; the GDM60 product-only signal does not replicate on the fresh GDM61 holdout. Three-clause operation exact correctness remains 0/16 for every GDM61 arm. |
-| **Active, unpromoted GDM62 transition** | GDM62 was launched before the scope change as a mixed operation/schema batch. Its two source attempts finished successfully. Only its **10 operation configurations** are eligible for forward use. A dedicated operation-only exact-attempt audit is running; its schema artifacts are frozen and excluded from promotion. |
+| **Latest supported operation result** | **GDM62 is negative/inconclusive for explicit rank-1 candidate-to-candidate semantic blocks.** The canonical request-relative control remains the retained architecture: no candidate-relational arm improves the broad answerable/safety frontier, clause-count correctness, or fresh ambiguity-family profile. |
+| **Next unverified hypothesis** | A learned rank-preserving candidate-set comparison may be required to distinguish plausible alternatives; fixed algebraic relations to the rank-1 candidate are insufficient. The next experiment must remain operation-only and should specifically test whether learned cross-candidate interaction improves persistent role/representation confusions without sacrificing publication safety. |
 | **Invalid historical evidence** | Original GDM41–44 jobs wrote manifests and fabricated/simulated metrics. Their promotions are withdrawn. Only measured repair run `35565425124` (196/196 verified) is the valid GDM41–44 baseline. |
 
 ## Operation-generation architecture
@@ -49,7 +49,7 @@ Natural-language intent/request + provided GraphQL schema/catalog
                  ranked real candidates + NONE evidence
                               |
                   learned clause-local ambiguity head
-          scalar/structural evidence + semantic candidate evidence
+       scalar/structural + rank-preserving request-relative semantics
                               |
              validation-calibrated thresholds/arbitration
                               |
@@ -65,6 +65,8 @@ Natural-language intent/request + provided GraphQL schema/catalog
                                                 |
                                       per-example evidence + metrics
 ```
+
+**GDM62 does not change the retained architecture.** It tested four matched alternatives that replaced one or both request-relative semantic blocks with explicit rank-1-candidate relations. Those alternatives are reproducible but do not improve the broad operation frontier, so the retained ambiguity representation remains the ranked request-relative control `q*ci + abs(q-ci)` rather than a GDM62 candidate-relational arm.
 
 ### Inputs and bounded capabilities
 
@@ -97,8 +99,9 @@ GDM51 introduced a separate clause-local ambiguity discriminator. Subsequent exp
 - GDM59: preserving top-five rank/identity helps through request-relative semantic interactions.
 - GDM60: capability-confidence attenuation is negative; product-only looked strongest for operation on that batch.
 - GDM61: fixed product/delta scaling does not yield a robust answerable/safety frontier and the GDM60 product-only operation endpoint does not replicate on fresh `Voucher` / `Anthology`.
+- **GDM62: fixed rank-1-to-candidate delta/product relations do not improve the broad operation frontier over the ranked request-relative control.**
 
-The unresolved operation errors are relational: plausible candidates are confused with other plausible candidates, particularly author versus moderator and adjacent representation/name-vs-ID concepts.
+The unresolved operation errors remain relational. In GDM62 the request-relative control retains **6/8** fresh role-family cases, while candidate-relational variants range from **0/8 to 5/8**; object-vs-supplier is already **8/8** for every arm, lifecycle-time remains **4/8** for every arm, and representation is **6/8** for the control and most arms. Hand-coded candidate-anchor transforms therefore do not resolve the difficult relation families.
 
 ### Validation-only arbitration
 
@@ -148,56 +151,79 @@ Every accepted compile, test, training run, validation, benchmark, and independe
 | GDM58 | Wider top-k through simple pooled representation produces little operation benefit. | Pooled candidate breadth is negative/inconclusive. |
 | GDM59 | Rank-preserving top-five request interactions improve useful signal versus pooled controls. | Preserve candidate rank/identity. |
 | GDM60 | Simple confidence weighting loses answerable recall; product-only was strongest operation factorization on that batch. | Confidence attenuation is negative; endpoint finding needs replication. |
-| **GDM61** | **Fixed product/delta scaling does not improve the within-batch answerable/safety frontier. The GDM60 operation product-only endpoint does not replicate on fresh Voucher/Anthology.** | **Treat scalar rescaling as negative/inconclusive. Three-clause generation and semantic candidate confusions remain major operation bottlenecks.** |
+| GDM61 | Fixed product/delta scaling does not improve the within-batch answerable/safety frontier; the GDM60 operation product-only endpoint does not replicate on fresh Voucher/Anthology. | Treat scalar rescaling as negative/inconclusive. |
+| **GDM62** | **Explicit rank-1 candidate-to-candidate delta/product blocks are negative/inconclusive. No arm beats the request-relative control on the broad operation answerable/safety frontier, and the difficult role family gets worse in every candidate-relational arm.** | **Retain request-relative ranked semantics. Test a genuinely learned cross-candidate comparison next rather than another fixed algebraic transform or scalar rescaling.** |
 
-Historical schema findings associated with these batches remain available in prior commits and artifacts but are frozen and are not forward research targets.
+Historical schema findings associated with GDM41–61 remain available in prior commits and artifacts but are frozen and are not forward research targets.
 
-# Latest canonical operation evidence: GDM61
+# Latest canonical operation evidence: GDM62
 
-GDM61 keeps top-five candidate breadth, rank preservation, explicit NONE, learned capability/ambiguity heads, exact GDM56 family-balanced ambiguity curriculum, frozen DistilBERT, the `1e-4` feature boundary, canonical numerical execution, GDM54 validation-only rescue, and deterministic GraphQL realization fixed. It changes only deterministic scaling of two request-relative semantic blocks.
+GDM62 keeps top-five candidate breadth and rank identity, explicit NONE, learned capability/ambiguity heads, the exact GDM56 family-balanced ambiguity curriculum, frozen DistilBERT, the `1e-4` feature boundary, canonical numerical execution, GDM54 validation-only rescue, and deterministic GraphQL realization fixed. The ambiguity head retains the same **`11 + 10*d = 7,691` DistilBERT input dimension** and matched trainable capacity across arms.
 
-`Badge` / `Journal` are calibration-only. `Voucher` / `Anthology` are the fresh GDM61 secondary holdout and are now **regression-only**.
+The experiment changes only the two rank-preserving semantic blocks supplied for each real candidate `ci`. The control is `(q*ci, abs(q-ci))`; the four alternatives introduce `abs(c1-ci)` or `c1*ci`, where `c1` is the rank-1 real candidate. This tests explicit candidate-to-candidate contrast without adding candidate breadth, parameters, transformer tuning, or a trained request-global status head.
 
-The operation holdout has 84 unique cases per seed: **36 answerable + 48 risk**, where risk is **32 NO_MATCH + 16 AMBIGUOUS**. Rates below are means over seeds `6101,6102`; status counts pool the two seeds, so AMBIGUOUS has denominator 32 and NO_MATCH denominator 64. Clause-count denominators pool seeds: **32 one-clause, 24 two-clause, 16 three-clause** evaluations.
+`Medallion` / `Gazette` are calibration-only. `Ticket` / `Compendium` are the fresh GDM62 secondary holdout and, after this canonical inspection, are now **regression-only**.
+
+The operation holdout has 84 unique cases per seed: **36 answerable + 48 risk**, where risk is **32 NO_MATCH + 16 AMBIGUOUS**. Rates below are means over seeds `6201,6202`; status counts pool the two seeds, so AMBIGUOUS has denominator 32 and NO_MATCH denominator 64. Clause-count denominators pool seeds: **32 one-clause, 24 two-clause, 16 three-clause** evaluations.
 
 | Representation | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Product only | 16.67% | 68.75% | 9.52% | **94.12%** | 14.84% | 12/32 | **54/64** |
-| Product dominant | **26.39%** | 63.54% | 13.69% | 88.85% | **25.00%** | 12/32 | 49/64 |
-| Balanced control | 20.83% | 67.71% | 9.52% | 84.12% | 17.97% | **19/32** | 46/64 |
-| Delta dominant | 20.83% | 68.75% | **8.93%** | 84.12% | 17.97% | **19/32** | 47/64 |
-| Delta only | 20.83% | **70.83%** | 9.52% | 84.12% | 17.97% | **19/32** | 49/64 |
+| **Request-relative control** `q*ci + abs(q-ci)` | **37.50%** | **61.46%** | 20.24% | 91.55% | **39.84%** | **24/32** | 35/64 |
+| Delta + candidate-product | **37.50%** | 60.42% | 21.43% | 91.55% | **39.84%** | 23/32 | 35/64 |
+| Delta + candidate-delta | 34.72% | 54.17% | 22.62% | 90.59% | 36.72% | 19/32 | 33/64 |
+| Product + candidate-product | 34.72% | 57.29% | 21.43% | 90.59% | 36.72% | 18/32 | **37/64** |
+| Product + candidate-delta | 30.56% | 55.21% | **13.10%** | **94.59%** | 27.34% | 16/32 | **37/64** |
 
-Product-dominant has the highest answerable accuracy and recall but is not a better frontier: versus balanced control it loses 4.17 points of risk accuracy, worsens incorrect publication by 4.17 points, and drops AMBIGUOUS recovery from 19/32 to 12/32.
+The candidate-relational hypothesis is therefore **negative/inconclusive**. `Delta + candidate-product` exactly matches control answerable accuracy and recall but loses risk accuracy and one AMBIGUOUS case while worsening incorrect publication. `Product + candidate-delta` materially lowers incorrect publication and raises precision, but it pays for that safety with a **6.94-point answerable loss**, a **12.50-point recall loss**, and AMBIGUOUS recovery falling from **24/32 to 16/32**. No candidate-relational arm produces a better overall frontier than the request-relative control.
 
-Exact one-/two-/three-clause correctness is **13/32, 6/24, 0/16** for product-dominant; **11/32, 4/24, 0/16** for balanced, delta-dominant, and delta-only; and **9/32, 3/24, 0/16** for product-only. No GDM61 arm solves three-clause operation generation.
+Exact one-/two-/three-clause correctness is **17/32, 8/24, 2/16** for the request-relative control and delta+candidate-product; **16/32, 8/24, 1/16** for delta+candidate-delta and product+candidate-product; and **15/32, 7/24, 0/16** for product+candidate-delta. The experiment does not improve multi-clause composition, and three-clause exact correctness remains a major bottleneck.
 
-Seed sensitivity remains material: product-only answerable correctness is 8/36 on seed 6101 versus 4/36 on seed 6102; product-dominant is 8/36 versus 11/36. Role confusions remain visible, including moderator requests accepted as author-name paths.
+### Fresh ambiguity-family analysis
 
-GDM61 mean operation regression request accuracy spans approximately **43.29%–48.24%** across arms.
+Each family has 8 pooled cases across the two seeds.
 
-Attempt-1 warm-generation measurements are observational: operation p50 spans approximately **67.78–72.31 ms**, p95 **136.02–141.79 ms**, and mean RSS-after-evaluation **1,142,246–1,146,080 KiB** across arms. Generation timing includes fresh request-clause encoding, learned-head scoring, deterministic GraphQL realization, and local validation with catalog/NONE vectors cached; downloads, initial catalog embedding, and backend fixture execution are excluded. RSS is process-level and affected by worker reuse, not isolated model memory.
+| Representation | Role | Lifecycle-time | Representation/name-vs-ID | Object-vs-supplier |
+| --- | ---: | ---: | ---: | ---: |
+| **Request-relative control** | **6/8** | 4/8 | **6/8** | **8/8** |
+| Delta + candidate-product | 5/8 | 4/8 | **6/8** | **8/8** |
+| Delta + candidate-delta | 1/8 | 4/8 | **6/8** | **8/8** |
+| Product + candidate-product | 0/8 | 4/8 | **6/8** | **8/8** |
+| Product + candidate-delta | 0/8 | 4/8 | 4/8 | **8/8** |
 
-## GDM61 reproducibility and provenance
+No fresh ambiguity family is solved by the candidate-relational arms. Object-vs-supplier is already saturated across all arms. Lifecycle-time is unchanged. Representation/name-vs-ID does not improve. Most importantly, **role discrimination deteriorates in every candidate-relational arm**, consistent with the remaining author-vs-moderator semantic confusions. This is direct evidence against fixed rank-1 candidate anchoring as the missing relation signal.
 
-The original GDM61 source `913a683d3d294b2475699a7f5e9b31c565779d1c`, run `35935198866`, failed before measured workers because one endpoint contract test incorrectly required coordinate equality for two semantically equivalent but differently slotted delta representations. It produced no model evidence. Failed preflight artifact **10782563755**, SHA-256 `301fb291d9d8d86a77eebd36531909b2dd588a13c873741bc12b93a14cae1ac1`.
+### Seed stability, regression and runtime limits
 
-Test-only repair `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a` changed only that contract test. Canonical GDM61 measured source is repaired commit `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, source run `35939206923`, attempts 1 and 2.
+The request-relative control is comparatively stable on answerable correctness (**36.11% vs 38.89%**, a 2.78-point seed gap) and risk accuracy (**60.42% vs 62.50%**, a 2.08-point gap), but incorrect publication still moves from **25.00% to 15.48%** across seeds. Candidate-relational arms do not show a consistent stability advantage: answerable seed gaps range from 0 to 8.33 points and incorrect-publication gaps from 0 to 14.29 points. The perfectly stable product+candidate-delta answerable/publication rates are stable at a substantially worse answerable/recall operating point, not evidence of a better model.
 
-- Attempt 1 mixed historical `BATCH_REPORT`: artifact **10784817334**, SHA-256 `d5ee636c17233358b353bac0189a8f05151a403adcd5afc840cf222a7eba2b4e`.
-- Attempt 2 mixed historical `BATCH_REPORT`: artifact **10786971655**, SHA-256 `b96dd49e032a20b781b53495329b780c4509c417e5f182d694eae0f81e8ae965`.
-- Passing exact-attempt audit run **35948010054**, audit workflow commit `d9d785da08c5866c52db8ae74f9ad597a1a4ba47`.
-- Passing audit artifact **10788215936**, SHA-256 `5b81ee234a0c4dfe889a33bf33d85e4b0640dc72a8f96d132063356861ba1d6f`.
+GDM62 mean operation regression request accuracy spans approximately **44.58%–51.16%** across arms. These inspected regressions and `Ticket` / `Compendium` are now regression-only; unlike fresh holdouts from other batches, they must not be used as a cross-batch causal leaderboard.
 
-The GDM61 audit report has `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, exact operation 10/10 plus historical schema 10/10, and all 20 comparisons exact. Post-suspension experiments require operation exactness only; historical schema matching is not a continuing requirement.
+Hosted-runner generation measurements are observational. In source attempt 1, p50 spans approximately **74.52–76.96 ms**, p95 **136.55–141.05 ms**, and mean RSS-after-evaluation **1,181,294–1,185,910 KiB** across arms. In source attempt 2, p50 spans approximately **55.48–56.52 ms**, p95 **107.25–109.64 ms**, and mean RSS **1,181,040–1,186,302 KiB**. The large timing shift across hosted runners is why timing/RSS are observational rather than exact reproducibility fields. Timing includes fresh request-clause encoding, learned-head scoring, deterministic GraphQL realization, and local validation with catalog/NONE vectors cached; downloads, initial catalog embedding, and backend fixture execution are excluded. RSS is process-level and affected by worker reuse, not isolated model memory.
 
-## Active transition: GDM62 operation evidence
+## GDM62 reproducibility and provenance
 
-GDM62 source commit `a3cfa70a570f931e2c78553ca9d72aeb5ed65e79` was launched immediately before schema research was suspended. Its source workflow therefore contained both operation and schema workers. Source run **35953082798** completed two successful exact source attempts. The schema artifacts are retained only as historical diagnostics and are excluded from forward promotion.
+GDM62 source commit is **`a3cfa70a570f931e2c78553ca9d72aeb5ed65e79`**, source run **`35953082798`**, attempts 1 and 2. The source workflow was launched before schema research was suspended and therefore also ran schema workers; those schema artifacts are frozen historical diagnostics and are **excluded from this promotion**.
 
-The eligible evidence is the five candidate-relational **operation** arms over seeds `6201,6202` (10 configs total). The source collector can independently verify those operation configurations without schema. A dedicated operation-only exact-attempt audit is being used to establish whether the two attempts reproduce exactly and whether this evidence can be promoted under the new scope.
+Operation source evidence:
 
-Until that audit passes, **GDM62 is not canonical** and its candidate-relational hypothesis remains unverified for promotion. Do not launch GDM63 merely to bypass this transition.
+- Attempt 1 operation worker artifact **10789199717**, SHA-256 `93a10707a60ed24c4b81e4bea789f348d78f1e43b2f86f3a046cf0e798b2f560`.
+- Attempt 2 operation worker artifact **10791037384**, SHA-256 `d39ea60bb4aec5dc41bc91436b37998ae3bc8d3e483014c8eda50ca481792b5f`.
+
+The first dedicated operation-only audit, run **35961242199** at workflow commit `54a777d87226ea831acfb52be771d794d77f8abb`, correctly exact-matched all **10/10 operation configurations** with `schema_configs_compared=0`, but failed its final aggregate-report assertion because it mistakenly treated hosted-runner p50/p95/RSS observations as deterministic cross-attempt fields. Failed audit artifact **10793190219**, SHA-256 `5b352f711ed7d0d9dfc7f2ee1a75de903606882892d7ad731fb97bac69ed3f01`, is preserved as diagnostic history; it is not promotion evidence.
+
+The bounded audit repair changed no model, data, training, calibration, representation, seeds, predictions, or source evidence. It permits cross-attempt differences only in aggregate `mean_p50_ms`, `mean_p95_ms`, and `mean_rss_kib`, matching the declared observational timing/memory policy, while requiring every other BATCH_REPORT field and every per-config deterministic snapshot/prediction comparison to remain exact.
+
+Passing operation-only audit repair:
+
+- Audit workflow commit **`87436836fda0ce80f1acded1de129c2a848253c1`**.
+- Passing audit run **`35965921793`**, job `107524346497`.
+- Independently rebuilt attempt-1 operation `BATCH_REPORT`: artifact **10793952970**, SHA-256 `f5d52a09995406a70de44e61dcfd935e305d1e6037b6dadaef83ab6b2be06a02`.
+- Independently rebuilt attempt-2 operation `BATCH_REPORT`: artifact **10793669216**, SHA-256 `796ab58772f8c051685d8b55047dc72ad9928c336e825fb5a36344c3dc60c5c3`.
+- Passing audit artifact **10793838520**, SHA-256 `9097e616801052520d3e62266bccc1159534e330e41664f2db10d4135f61dff5`.
+
+The repaired `gdm62-operation-reproducibility-audit-v1` gate has `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, `expected_operation_configs=10`, `matched_operation_configs=10`, `schema_configs_compared=0`, all 10 configuration comparisons exact with `differing_fields=[]`, and no raw-feature differences. Cross-attempt aggregate differences are restricted to observational p50/p95/RSS.
+
+A separate Actions-only promotion analysis run **35966255656** at commit `283ab6aaef2e0e9bede33107d3f10ee0a7934d05` aggregated the verified seed/family/runtime evidence without retraining. Analysis artifact **10794162808**, SHA-256 `ce7a2435ce6a53809b663a67d77723a3d58cd493b5ad9ee1a43c137a9bcdbe16`. `Ticket` / `Compendium` becomes regression-only with this inspection.
 
 ## Canonical provenance
 
@@ -215,7 +241,8 @@ Until that audit passes, **GDM62 is not canonical** and its candidate-relational
 | GDM58 | source `9ba9caab957c1802feb17776195141f630fd96eb`, run `35819165142` | `35890238431` |
 | GDM59 | source `035f44836d850b24f4bebe5cd499a572b6052752`, run `35898256989` | `35910892558` |
 | GDM60 | source `c04784ec33983829f6fe55506bcb74e0f40442b2`, run `35918183757` | `35929537000` |
-| **GDM61** | source `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, run `35939206923` | **`35948010054`** |
+| GDM61 | source `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, run `35939206923` | `35948010054` |
+| **GDM62 operation-only** | source `a3cfa70a570f931e2c78553ca9d72aeb5ed65e79`, run `35953082798` | **`35965921793`** (bounded repair of diagnostic audit `35961242199`) |
 
 ## Evidence and promotion policy
 
@@ -229,9 +256,9 @@ Historical schema metrics and artifacts are retained for provenance but are froz
 
 The measured system remains a small synthetic, schema-grounded research environment. It has not established unrestricted operation token generation, general mutation/subscription generation, arbitrary enterprise topology handling, learned clause decomposition, transformer fine-tuning benefits, or production-scale latency/memory behavior.
 
-The immediate gate is **GDM62 operation-only reproducibility**. Its candidate-relational representation asks whether explicit relations among plausible ranked candidates add useful ambiguity information beyond request-relative semantics. No architectural conclusion should be drawn until the operation-only exact-attempt audit passes.
+GDM62 rules out another narrow family of hand-designed ambiguity representations: **fixed rank-1 candidate-to-candidate product/delta relations do not improve the retained request-relative control**. The strongest remaining fresh error signal is role discrimination, while object-vs-supplier is already saturated and lifecycle/representation do not improve under the tested transforms. Three-clause exact operation generation also remains poor.
 
-If that audit passes, GDM62 must be analyzed and documented in this README before any GDM63 design or launch. If it fails, preserve the attempts and localize the first operation-evidence divergence rather than weakening equality or reverting to schema work.
+The next unverified hypothesis is therefore deliberately different: **a small learned rank-preserving cross-candidate interaction may extract useful contrast among plausible candidates that fixed algebraic `c1↔ci` relations cannot.** Any GDM63 design must remain operation-only, keep the frozen encoder/numerical/calibration/GraphQL contracts fixed, preserve matched bounded capacity across arms, and test whether learned candidate-set interaction improves role/representation ambiguity and multi-clause operation correctness without worsening unsafe publication.
 
 ## Repository map
 
@@ -247,8 +274,8 @@ If that audit passes, GDM62 must be analyzed and documented in this README befor
 | [`experiments/followup58/`](experiments/followup58/) | Pooled top-k ambiguity evidence |
 | [`experiments/followup59/`](experiments/followup59/) | Rank-preserving top-five ambiguity representation |
 | [`experiments/followup60/`](experiments/followup60/) | Request-relative factorization/confidence scaling |
-| [`experiments/followup61/`](experiments/followup61/) | Fixed product/delta balance; latest canonical evidence |
-| [`experiments/followup62/`](experiments/followup62/) | Candidate-relational experiment launched pre-suspension; operation evidence only is eligible forward |
-| [`.github/workflows/`](.github/workflows/) | Actions-only measured batches and exact-attempt audits |
+| [`experiments/followup61/`](experiments/followup61/) | Fixed product/delta balance; historical canonical evidence |
+| [`experiments/followup62/`](experiments/followup62/) | Candidate-relational operation experiment; latest canonical evidence |
+| [`.github/workflows/`](.github/workflows/) | Actions-only measured batches, audits, and evidence analyses |
 
 Use each experiment's declared workflow/execution wrapper when reproducing it. Calling historical Python entrypoints directly can bypass the canonical numerical contract.
