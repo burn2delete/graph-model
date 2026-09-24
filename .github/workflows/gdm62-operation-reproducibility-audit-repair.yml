@@ -1,0 +1,286 @@
+name: GDM62 operation-only reproducibility audit repair
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/gdm62-operation-reproducibility-audit-repair.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: graph-model-gdm62-operation-audit
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_RUN: '35953082798'
+      SOURCE_SHA: a3cfa70a570f931e2c78553ca9d72aeb5ed65e79
+      FAILED_AUDIT_RUN: '35961242199'
+      FAILED_AUDIT_SHA: 54a777d87226ea831acfb52be771d794d77f8abb
+      FAILED_AUDIT_ARTIFACT: '10793190219'
+      FAILED_AUDIT_DIGEST: sha256:5b352f711ed7d0d9dfc7f2ee1a75de903606882892d7ad731fb97bac69ed3f01
+      ATTEMPT1_BATCH_ARTIFACT: '10792164176'
+      ATTEMPT1_BATCH_DIGEST: sha256:dcd3bdbeae7c0533ed11566856a2c6790d342e10abf62985f4f627572e748022
+      ATTEMPT2_BATCH_ARTIFACT: '10792179084'
+      ATTEMPT2_BATCH_DIGEST: sha256:54a4df09ccc1354ac72ee3f41483b1b293b8850bc9ed1e0bb7d2ab809afefea9
+      GH_TOKEN: ${{ github.token }}
+      PYTHONHASHSEED: '0'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify failed-audit boundary and repair observational batch equality
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output audit-scratch
+          command -v gh
+          python -u - <<'PY' 2>&1 | tee audit-output/audit-repair.log
+          import copy
+          import hashlib
+          import json
+          import os
+          import stat
+          import subprocess
+          import traceback
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          REPO = 'burn2delete/graph-model'
+          SOURCE_RUN = int(os.environ['SOURCE_RUN'])
+          SOURCE_SHA = os.environ['SOURCE_SHA']
+          FAILED_RUN = int(os.environ['FAILED_AUDIT_RUN'])
+          FAILED_SHA = os.environ['FAILED_AUDIT_SHA']
+          OUTPUT = Path('audit-output')
+          SCRATCH = Path('audit-scratch')
+          OBSERVATIONAL = {'mean_p50_ms', 'mean_p95_ms', 'mean_rss_kib'}
+
+          artifacts = {
+              'failed_audit': (int(os.environ['FAILED_AUDIT_ARTIFACT']), os.environ['FAILED_AUDIT_DIGEST']),
+              'attempt1_batch': (int(os.environ['ATTEMPT1_BATCH_ARTIFACT']), os.environ['ATTEMPT1_BATCH_DIGEST']),
+              'attempt2_batch': (int(os.environ['ATTEMPT2_BATCH_ARTIFACT']), os.environ['ATTEMPT2_BATCH_DIGEST']),
+          }
+
+          report = {
+              'format': 'gdm62-operation-reproducibility-audit-v1',
+              'scope': 'operation-generation evidence only; schema-generation evidence is frozen and excluded from promotion',
+              'source_run': SOURCE_RUN,
+              'source_commit': SOURCE_SHA,
+              'source_attempts': [1, 2],
+              'audit_run': int(os.environ['GITHUB_RUN_ID']),
+              'audit_workflow_commit': os.environ['GITHUB_SHA'],
+              'repair_of_audit_run': FAILED_RUN,
+              'repair_of_audit_commit': FAILED_SHA,
+              'repair_scope': 'the prior audit had already exact-matched all ten operation configurations and failed only because aggregate BATCH_REPORT timing/RSS observations were compared as deterministic fields; this repair permits differences only in mean_p50_ms, mean_p95_ms and mean_rss_kib while preserving exact equality for every other report field',
+              'complete': False,
+              'evidence_verified': False,
+              'reproducible': False,
+              'promotion_eligible': False,
+              'expected_operation_configs': 10,
+              'matched_operation_configs': 0,
+              'schema_configs_compared': 0,
+              'comparisons': [],
+              'raw_feature_differences': [],
+              'batch_observational_differences': [],
+              'provenance': {},
+              'errors': [],
+          }
+
+          def write_report():
+              (OUTPUT / 'REPRODUCIBILITY_REPORT.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+
+          def require(condition, message):
+              if not condition:
+                  raise AssertionError(message)
+
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{REPO}/{path}']))
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with Path(path).open('rb') as handle:
+                  for block in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(block)
+              return h.hexdigest()
+
+          def safe_download(label, artifact_id, expected_digest):
+              meta = api(f'actions/artifacts/{artifact_id}')
+              require(meta.get('id') == artifact_id, f'{label} artifact id mismatch')
+              require(meta.get('digest') == expected_digest, f'{label} artifact metadata digest mismatch')
+              require(meta.get('expired') is False, f'{label} artifact expired')
+              wr = meta.get('workflow_run') or {}
+              require(wr.get('id') == FAILED_RUN, f'{label} wrong audit run')
+              require(wr.get('head_sha') == FAILED_SHA, f'{label} wrong audit sha')
+              root = SCRATCH / label
+              root.mkdir(parents=True, exist_ok=False)
+              zpath = root.with_suffix('.zip')
+              with zpath.open('wb') as handle:
+                  subprocess.run(['gh', 'api', f'repos/{REPO}/actions/artifacts/{artifact_id}/zip'], stdout=handle, check=True)
+              require('sha256:' + sha256(zpath) == expected_digest, f'{label} downloaded ZIP digest mismatch')
+              with zipfile.ZipFile(zpath) as archive:
+                  require(sum(x.file_size for x in archive.infolist()) < 64 * 1024 * 1024, f'{label} archive unexpectedly large')
+                  for item in archive.infolist():
+                      p = PurePosixPath(item.filename)
+                      require(not p.is_absolute(), f'{label} absolute archive path')
+                      require('..' not in p.parts and '\\' not in item.filename, f'{label} unsafe archive path')
+                      require(not stat.S_ISLNK(item.external_attr >> 16), f'{label} archive symlink')
+                  archive.extractall(root)
+              zpath.unlink()
+              report['provenance'][label] = {
+                  'artifact_id': artifact_id,
+                  'digest': expected_digest,
+                  'created_at': meta.get('created_at'),
+                  'workflow_run': wr,
+              }
+              return root
+
+          def one(root, name):
+              paths = list(Path(root).rglob(name))
+              require(len(paths) == 1, f'expected one {name} in {root}: {paths}')
+              return paths[0]
+
+          def load(path):
+              return json.loads(Path(path).read_text())
+
+          def sorted_report(doc, drop_observational=False):
+              out = copy.deepcopy(doc)
+              out['aggregates'] = sorted(out.get('aggregates', []), key=lambda r: (r.get('task',''), r.get('arm',''), r.get('backbone','')))
+              for row in out['aggregates']:
+                  row['semantic_confusions'] = sorted(row.get('semantic_confusions', []), key=lambda x: (x.get('reference',''), x.get('predicted',''), x.get('count',0)))
+                  if drop_observational:
+                      for field in OBSERVATIONAL:
+                          row.pop(field, None)
+              return out
+
+          def validate_batch(doc, label):
+              require(doc.get('format') == 'gdm62-batch-report-v1', f'{label} format mismatch')
+              require(doc.get('source_commit') == SOURCE_SHA, f'{label} source mismatch')
+              require(doc.get('complete') is True and doc.get('verified') is True, f'{label} not verified')
+              require(doc.get('expected_results') == 10 and doc.get('verified_results') == 10, f'{label} not 10/10')
+              require(doc.get('missing_results') == [] and doc.get('failed_results') == [] and doc.get('unexpected_results') == [], f'{label} has missing/failed/unexpected')
+              require(len(doc.get('aggregates', [])) == 5, f'{label} wrong aggregate count')
+              require(all(row.get('task') == 'operation' for row in doc['aggregates']), f'{label} schema aggregate leaked')
+
+          try:
+              failed_run = api(f'actions/runs/{FAILED_RUN}')
+              require(failed_run.get('head_sha') == FAILED_SHA, 'failed audit run sha mismatch')
+              require(failed_run.get('status') == 'completed' and failed_run.get('conclusion') == 'failure', 'expected preserved failed audit run')
+
+              roots = {label: safe_download(label, *spec) for label, spec in artifacts.items()}
+              failed = load(one(roots['failed_audit'], 'REPRODUCIBILITY_REPORT.json'))
+              require(failed.get('format') == 'gdm62-operation-reproducibility-audit-v1', 'failed audit format mismatch')
+              require(failed.get('source_run') == SOURCE_RUN and failed.get('source_commit') == SOURCE_SHA, 'failed audit source mismatch')
+              require(failed.get('audit_run') == FAILED_RUN and failed.get('audit_workflow_commit') == FAILED_SHA, 'failed audit provenance mismatch')
+              require(failed.get('expected_operation_configs') == 10, 'failed audit expected config mismatch')
+              require(failed.get('matched_operation_configs') == 10, 'failed audit did not exact-match all operation configs')
+              require(failed.get('schema_configs_compared') == 0, 'schema evidence entered failed audit')
+              require(len(failed.get('comparisons', [])) == 10, 'failed audit comparison count mismatch')
+              require(all(x.get('exact_match') is True and x.get('differing_fields') == [] for x in failed['comparisons']), 'failed audit contains non-exact config comparison')
+              require(failed.get('raw_feature_differences') == [], 'failed audit has raw feature differences')
+              require(failed.get('errors') == ['AssertionError: operation BATCH_REPORT differs across attempts'], 'failed audit failure was not isolated to aggregate BATCH_REPORT equality')
+              require(failed.get('complete') is False and failed.get('evidence_verified') is False and failed.get('reproducible') is False and failed.get('promotion_eligible') is False, 'failed audit terminal state unexpected')
+
+              batch1 = load(one(roots['attempt1_batch'], 'ATTEMPT1_OPERATION_BATCH_REPORT.json'))
+              batch2 = load(one(roots['attempt2_batch'], 'ATTEMPT2_OPERATION_BATCH_REPORT.json'))
+              embedded1 = load(one(roots['failed_audit'], 'ATTEMPT1_OPERATION_BATCH_REPORT.json'))
+              embedded2 = load(one(roots['failed_audit'], 'ATTEMPT2_OPERATION_BATCH_REPORT.json'))
+              require(batch1 == embedded1, 'attempt1 standalone/embedded BATCH_REPORT mismatch')
+              require(batch2 == embedded2, 'attempt2 standalone/embedded BATCH_REPORT mismatch')
+              validate_batch(batch1, 'attempt1')
+              validate_batch(batch2, 'attempt2')
+
+              deterministic1 = sorted_report(batch1, drop_observational=True)
+              deterministic2 = sorted_report(batch2, drop_observational=True)
+              require(deterministic1 == deterministic2, 'operation BATCH_REPORT has non-observational cross-attempt differences')
+
+              by1 = {(r['task'], r['arm'], r.get('backbone','')): r for r in sorted_report(batch1)['aggregates']}
+              by2 = {(r['task'], r['arm'], r.get('backbone','')): r for r in sorted_report(batch2)['aggregates']}
+              require(set(by1) == set(by2), 'aggregate key mismatch')
+              for key in sorted(by1):
+                  left, right = by1[key], by2[key]
+                  changed = sorted(k for k in set(left) | set(right) if left.get(k) != right.get(k))
+                  require(set(changed).issubset(OBSERVATIONAL), f'non-observational aggregate difference {key}: {changed}')
+                  report['batch_observational_differences'].append({
+                      'task': key[0],
+                      'arm': key[1],
+                      'backbone': key[2],
+                      'differing_fields': changed,
+                      'attempt1': {k: left.get(k) for k in sorted(OBSERVATIONAL)},
+                      'attempt2': {k: right.get(k) for k in sorted(OBSERVATIONAL)},
+                  })
+
+              report['comparisons'] = copy.deepcopy(failed['comparisons'])
+              report['matched_operation_configs'] = 10
+              report['raw_feature_differences'] = copy.deepcopy(failed.get('raw_feature_differences', []))
+              report['prior_audit_provenance'] = copy.deepcopy(failed.get('provenance', {}))
+              report['prior_audit_timing_observations'] = copy.deepcopy(failed.get('timing_observations', []))
+              report['complete'] = True
+              report['evidence_verified'] = True
+              report['reproducible'] = True
+              report['promotion_eligible'] = True
+              shutil1 = OUTPUT / 'ATTEMPT1_OPERATION_BATCH_REPORT.json'
+              shutil2 = OUTPUT / 'ATTEMPT2_OPERATION_BATCH_REPORT.json'
+              shutil1.write_text(json.dumps(batch1, indent=2, sort_keys=True) + '\n')
+              shutil2.write_text(json.dumps(batch2, indent=2, sort_keys=True) + '\n')
+              write_report()
+              print('GDM62 operation-only audit repair passed: 10/10 configs exact; BATCH_REPORT differences restricted to observational p50/p95/RSS; schema compared 0')
+          except Exception as exc:
+              report['errors'].append(type(exc).__name__ + ': ' + str(exc))
+              report['traceback'] = traceback.format_exc()
+              write_report()
+              raise
+          finally:
+              write_report()
+          PY
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r = json.loads(Path('audit-output/REPRODUCIBILITY_REPORT.json').read_text())
+          assert r['format'] == 'gdm62-operation-reproducibility-audit-v1'
+          assert r['complete'] is True
+          assert r['evidence_verified'] is True
+          assert r['reproducible'] is True
+          assert r['promotion_eligible'] is True
+          assert r['errors'] == []
+          assert r['expected_operation_configs'] == 10
+          assert r['matched_operation_configs'] == 10
+          assert r['schema_configs_compared'] == 0
+          assert len(r['comparisons']) == 10
+          assert all(x['exact_match'] and x['differing_fields'] == [] for x in r['comparisons'])
+          allowed = {'mean_p50_ms', 'mean_p95_ms', 'mean_rss_kib'}
+          assert all(set(x['differing_fields']).issubset(allowed) for x in r['batch_observational_differences'])
+          print('promotion gate passed')
+          PY
+      - name: Upload repaired attempt 1 operation BATCH_REPORT
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdm62-operation-attempt1-batch-repair-${{ github.run_id }}
+          path: audit-output/ATTEMPT1_OPERATION_BATCH_REPORT.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload repaired attempt 2 operation BATCH_REPORT
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdm62-operation-attempt2-batch-repair-${{ github.run_id }}
+          path: audit-output/ATTEMPT2_OPERATION_BATCH_REPORT.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload repaired operation reproducibility audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdm62-operation-reproducibility-repair-${{ github.run_id }}
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
