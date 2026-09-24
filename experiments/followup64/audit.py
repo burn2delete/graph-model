@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -47,6 +48,41 @@ def replace_once(script: str, old: str, new: str) -> str:
     if count != 1:
         raise AssertionError((count, old[:160]))
     return script.replace(old, new, 1)
+
+
+def replace_indented_pair(script: str) -> str:
+    pattern = re.compile(
+        r"(?m)^(?P<indent>[ \t]*)adapter_counts = set\(\)\n(?P=indent)ambiguity_counts = set\(\)\n"
+    )
+    script, count = pattern.subn(
+        lambda match: f"{match.group('indent')}ambiguity_counts = set()\n",
+        script,
+        count=1,
+    )
+    if count != 1:
+        raise AssertionError((count, "adapter_counts/ambiguity_counts pair"))
+    return script
+
+
+def replace_validation_block(script: str, replacement: str) -> str:
+    start_marker = "require(training.get('gdm63_family') == 'learned-rank-preserving-cross-candidate-interaction'"
+    end_marker = "require(training['gdm63_initial_interaction_hash'] != training['gdm63_selected_interaction_hash'], 'interaction adapter did not change')"
+    if script.count(start_marker) != 1 or script.count(end_marker) != 1:
+        raise AssertionError((script.count(start_marker), script.count(end_marker), "GDM63 validation markers"))
+    marker_index = script.index(start_marker)
+    line_start = script.rfind("\n", 0, marker_index) + 1
+    indent = script[line_start:marker_index]
+    if indent.strip():
+        raise AssertionError("unexpected validation indentation prefix")
+    end_index = script.index(end_marker, marker_index) + len(end_marker)
+    line_end = script.find("\n", end_index)
+    if line_end < 0:
+        line_end = len(script)
+    else:
+        line_end += 1
+    lines = replacement.strip("\n").splitlines()
+    rendered = "\n".join(indent + line if line else "" for line in lines) + "\n"
+    return script[:line_start] + rendered + script[line_end:]
 
 
 def extract_template() -> str:
@@ -157,62 +193,34 @@ assert BLOCK_KINDS == {
     script = script.replace("experiments.followup63.collect", "experiments.followup64.collect")
     script = script.replace("'6301,6302'", "'6401,6402'")
     script = script.replace("schema evidence leaked into GDM63 source report", "schema evidence leaked into GDM64 source report")
+    script = replace_indented_pair(script)
 
-    script = replace_once(
-        script,
-        "              adapter_counts = set()\n              ambiguity_counts = set()\n",
-        "              ambiguity_counts = set()\n",
-    )
-
-    old_validation = """                  require(training.get('gdm63_family') == 'learned-rank-preserving-cross-candidate-interaction', 'missing GDM63 family receipt')
-                  require(training.get('gdm63_interaction_mode') == arm, 'interaction mode receipt mismatch')
-                  require(training.get('gdm63_requested_topk') == TOPK == 5, 'wrong TOP5 receipt')
-                  require(training.get('gdm63_rank_preserving') is True, 'rank preservation missing')
-                  require(training.get('gdm63_raw_representation') == 'canonical ranked request-product q*ci plus request-delta abs(q-ci)', 'raw representation changed')
-                  require(training.get('gdm63_interaction_description') == _interaction_description(arm), 'interaction description mismatch')
-                  require(training.get('gdm63_latent_width') == LATENT_WIDTH == 4, 'latent width mismatch')
-                  expected_dim = ambiguity_feature_dim(768)
-                  require(training.get('gdm63_ambiguity_feature_dim') == expected_dim == 7691, 'raw ambiguity dimension mismatch')
-                  require(training.get('gdm63_interaction_parameter_count') == interaction_parameter_count(768), 'interaction parameter count mismatch')
-                  adapter_counts.add(training.get('gdm63_interaction_parameter_count'))
-                  ambiguity_counts.add(training.get('gdm63_ambiguity_parameter_count'))
-                  changed = training.get('gdm63_changed_interaction_parameter_tensors')
-                  require(isinstance(changed, list) and 'ambiguity.proj.weight' in changed, 'interaction projection did not change')
-                  require(training.get('gdm56_ambiguity_curriculum') == 'family-balanced', 'curriculum changed')
-                  require(float(training.get('gdm56_counterfactual_negative_fraction', -1)) == 0.0, 'counterfactual curriculum changed')
-                  validate_checkpoint(summary, directory, 'initial')
-                  validate_checkpoint(summary, directory, 'selected')
-                  require(training['initial_state_hash'] != training['selected_state_hash'], 'full learned state did not change')
-                  require(training['initial_capability_hash'] != training['selected_capability_hash'], 'capability head did not change')
-                  require(training['initial_ambiguity_hash'] != training['selected_ambiguity_hash'], 'ambiguity head did not change')
-                  require(training['gdm63_initial_interaction_hash'] != training['gdm63_selected_interaction_hash'], 'interaction adapter did not change')
+    new_validation = """require(training.get('gdm64_family') == 'schema-coordinate-semantic-factorization', 'missing GDM64 family receipt')
+require(training.get('gdm64_representation_mode') == arm, 'representation mode receipt mismatch')
+require(training.get('gdm64_requested_topk') == TOPK == 5, 'wrong TOP5 receipt')
+require(training.get('gdm64_rank_preserving') is True, 'rank preservation missing')
+expected_dim = ambiguity_feature_dim(768)
+require(training.get('gdm64_ambiguity_feature_dim') == expected_dim == 7691, 'ambiguity dimension mismatch')
+require(training.get('gdm64_semantic_representation') == _representation_description(arm), 'representation description mismatch')
+first, second = BLOCK_KINDS[arm]
+require(training.get('gdm64_first_block') == first, 'first semantic block mismatch')
+require(training.get('gdm64_second_block') == second, 'second semantic block mismatch')
+require(training.get('gdm64_parent_text_contract') == 'GraphQL parent path: + path[1:-1] joined by dot; <root> if empty', 'parent text contract mismatch')
+require(training.get('gdm64_leaf_text_contract') == 'GraphQL leaf field: + path[-1]', 'leaf text contract mismatch')
+require(training.get('gdm64_catalog_semantic_views_cached') is True, 'catalog semantic views must be cached')
+require(training.get('canonical_gdm63_source_commit') == CANONICAL_GDM63_SOURCE, 'canonical GDM63 source receipt mismatch')
+require(training.get('canonical_gdm63_audit_run') == CANONICAL_GDM63_AUDIT_RUN, 'canonical GDM63 audit receipt mismatch')
+require(training.get('canonical_gdm63_promotion_commit') == CANONICAL_GDM63_PROMOTION, 'canonical GDM63 promotion receipt mismatch')
+ambiguity_counts.add(training.get('gdm64_ambiguity_parameter_count'))
+require(training.get('gdm56_ambiguity_curriculum') == 'family-balanced', 'curriculum changed')
+require(float(training.get('gdm56_counterfactual_negative_fraction', -1)) == 0.0, 'counterfactual curriculum changed')
+validate_checkpoint(summary, directory, 'initial')
+validate_checkpoint(summary, directory, 'selected')
+require(training['initial_state_hash'] != training['selected_state_hash'], 'full learned state did not change')
+require(training['initial_capability_hash'] != training['selected_capability_hash'], 'capability head did not change')
+require(training['initial_ambiguity_hash'] != training['selected_ambiguity_hash'], 'ambiguity head did not change')
 """
-    new_validation = """                  require(training.get('gdm64_family') == 'schema-coordinate-semantic-factorization', 'missing GDM64 family receipt')
-                  require(training.get('gdm64_representation_mode') == arm, 'representation mode receipt mismatch')
-                  require(training.get('gdm64_requested_topk') == TOPK == 5, 'wrong TOP5 receipt')
-                  require(training.get('gdm64_rank_preserving') is True, 'rank preservation missing')
-                  expected_dim = ambiguity_feature_dim(768)
-                  require(training.get('gdm64_ambiguity_feature_dim') == expected_dim == 7691, 'ambiguity dimension mismatch')
-                  require(training.get('gdm64_semantic_representation') == _representation_description(arm), 'representation description mismatch')
-                  first, second = BLOCK_KINDS[arm]
-                  require(training.get('gdm64_first_block') == first, 'first semantic block mismatch')
-                  require(training.get('gdm64_second_block') == second, 'second semantic block mismatch')
-                  require(training.get('gdm64_parent_text_contract') == 'GraphQL parent path: + path[1:-1] joined by dot; <root> if empty', 'parent text contract mismatch')
-                  require(training.get('gdm64_leaf_text_contract') == 'GraphQL leaf field: + path[-1]', 'leaf text contract mismatch')
-                  require(training.get('gdm64_catalog_semantic_views_cached') is True, 'catalog semantic views must be cached')
-                  require(training.get('canonical_gdm63_source_commit') == CANONICAL_GDM63_SOURCE, 'canonical GDM63 source receipt mismatch')
-                  require(training.get('canonical_gdm63_audit_run') == CANONICAL_GDM63_AUDIT_RUN, 'canonical GDM63 audit receipt mismatch')
-                  require(training.get('canonical_gdm63_promotion_commit') == CANONICAL_GDM63_PROMOTION, 'canonical GDM63 promotion receipt mismatch')
-                  ambiguity_counts.add(training.get('gdm64_ambiguity_parameter_count'))
-                  require(training.get('gdm56_ambiguity_curriculum') == 'family-balanced', 'curriculum changed')
-                  require(float(training.get('gdm56_counterfactual_negative_fraction', -1)) == 0.0, 'counterfactual curriculum changed')
-                  validate_checkpoint(summary, directory, 'initial')
-                  validate_checkpoint(summary, directory, 'selected')
-                  require(training['initial_state_hash'] != training['selected_state_hash'], 'full learned state did not change')
-                  require(training['initial_capability_hash'] != training['selected_capability_hash'], 'capability head did not change')
-                  require(training['initial_ambiguity_hash'] != training['selected_ambiguity_hash'], 'ambiguity head did not change')
-"""
-    script = replace_once(script, old_validation, new_validation)
+    script = replace_validation_block(script, new_validation)
     script = replace_once(
         script,
         "require(len(adapter_counts) == 1 and len(ambiguity_counts) == 1, f'matched-capacity contract broken attempt {attempt}')",
