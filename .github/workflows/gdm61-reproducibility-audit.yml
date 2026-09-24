@@ -1,0 +1,162 @@
+name: GDM61 exact-attempt reproducibility audit
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/gdm61-reproducibility-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: graph-model-gdm61-audit
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      SOURCE_RUN: '35939206923'
+      SOURCE_SHA: f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a
+      GH_TOKEN: ${{ github.token }}
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+      OMP_DYNAMIC: 'FALSE'
+      MKL_DYNAMIC: 'FALSE'
+      MKL_CBWR: COMPATIBLE
+      ATEN_CPU_CAPABILITY: default
+      PYTHONHASHSEED: '0'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install source verifier dependencies
+        run: |
+          set -euo pipefail
+          mkdir -p audit-output
+          command -v gh
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m pip freeze > audit-output/packages.txt
+      - name: Verify isolated attempts and compare all twenty configurations
+        run: |
+          set -euo pipefail
+          python -u - <<'BOOTSTRAP' 2>&1 | tee audit-output/bootstrap.log
+          import os
+          import re
+          import subprocess
+          import textwrap
+          from pathlib import Path
+
+          source = Path('.github/workflows/gdm60-reproducibility-audit.yml').read_text()
+          marker = "          python -u - <<'PY' 2>&1 | tee audit-output/audit.log\n"
+          end_marker = "\n          PY\n"
+          assert source.count(marker) == 1, 'canonical GDM60 audit Python marker changed'
+          body = source.split(marker, 1)[1]
+          assert body.count(end_marker) >= 1, 'canonical GDM60 audit end marker changed'
+          script = textwrap.dedent(body.split(end_marker, 1)[0])
+
+          replacements = [
+              ("experiments.followup60.collect", "experiments.followup61.collect"),
+              ("from experiments.followup60.run import _representation_description", "from experiments.followup61.run import _representation_description, BLOCK_SCALES"),
+              ("SEEDS = (6001, 6002)", "SEEDS = (6101, 6102)"),
+              ("'ranked-request-control',\n    'ranked-product-only',\n    'ranked-delta-only',\n    'ranked-confidence-weighted',\n    'ranked-relative-confidence',", "'ranked-product-only',\n    'ranked-product-dominant',\n    'ranked-balanced-control',\n    'ranked-delta-dominant',\n    'ranked-delta-only',"),
+              ("ambiguity-head rank-preserving request-relative confidence weighting only; fixed top5 breadth, capacity, canonical GDM56 family-balanced curriculum, canonical numerical path and GDM54 5pp rescue arbitration", "ambiguity-head fixed product/delta block balance only; fixed top5 breadth, rank preservation, capacity, canonical GDM56 family-balanced curriculum, canonical numerical path and GDM54 5pp rescue arbitration"),
+              ("CANONICAL_GDM59_SOURCE", "CANONICAL_GDM60_SOURCE"),
+              ("CANONICAL_GDM59_AUDIT", "CANONICAL_GDM60_AUDIT"),
+              ("035f44836d850b24f4bebe5cd499a572b6052752", "c04784ec33983829f6fe55506bcb74e0f40442b2"),
+              ("35910892558", "35929537000"),
+              ("10777266084", "10784817334"),
+              ("10776653387", "10785240818"),
+              ("10777285495", "10784563818"),
+              ("10776076669", "10784590865"),
+              ("10779222122", "10786971655"),
+              ("10779086279", "10785474533"),
+              ("10778930833", "10786044892"),
+              ("10777369197", "10786241213"),
+              ("sha256:9e4db92b71060fa9adac6a0edae8e1581b76bba81ffc6c67998f857c1372483f", "sha256:d5ee636c17233358b353bac0189a8f05151a403adcd5afc840cf222a7eba2b4e"),
+              ("sha256:ae3aa56d6ab7bfd66c76344696008e039e2b14e1db30f8b10737cffde84b3113", "sha256:97e9cc7ade40a7ba7f1914522752d9d00351fa5475d00a96a05774a72b31a0cd"),
+              ("sha256:128f2f46e08ce6de060abdab18fddaa0655480f91ce6c24f44bb804804e8eecd", "sha256:49f8da7c79726e50cf34df6b029fbf8e55a1bf49e348ad50bea9864ac60f7c94"),
+              ("sha256:ab03a67d6eae5d33cf1133083f06fa6ae124fd97053d80b79ea858bdc4f81d0b", "sha256:7b60f4f54d4783860cfd8d06dfeb536b68d8b2b58769dc9b80d4e29c307c4fab"),
+              ("sha256:b63d54094c15e039d078f2fa84c26127eea48108a1fdd967ff616e5949ab1975", "sha256:b96dd49e032a20b781b53495329b780c4509c417e5f182d694eae0f81e8ae965"),
+              ("sha256:c8e269da45ea55709e686b9ffc71cf4383c362706108e3ac321086ae235253c6", "sha256:28daab304963adad4ceff6c480aaacfc2dee1a12f78c1d9e56f941a958da9c2c"),
+              ("sha256:9d9069e3d2f396a1f875d54ad9a708070541b140063c92cfc492f6740e57e4f6", "sha256:c015b403402a5fabc10db7c664c96925778eb0430164b3cf75311b3a031176c8"),
+              ("sha256:98668df8a554b122980de19071857a32b085c8c2c1a26e40b6c270ac622e2a2f", "sha256:9a3cc51ea1c24f913f9e7fa1ece269a13670c4834f19c665677c9c8326e621db"),
+              ("107375046830", "107443127930"),
+              ("107375702441", "107443440864"),
+              ("107375702449", "107443440891"),
+              ("107383255286", "107448426413"),
+              ("107392443753", "107457466909"),
+              ("107393017413", "107457849248"),
+              ("107393017376", "107457849255"),
+              ("107400373851", "107463262884"),
+              ("gdm60", "gdm61"),
+              ("GDM60", "GDM61"),
+              ("canonical_gdm59_source_commit", "canonical_gdm60_source_commit"),
+              ("canonical_gdm59_audit_run", "canonical_gdm60_audit_run"),
+              ("confidence-scaled-ranked-request-ambiguity-evidence", "fixed-ranked-request-interaction-block-balance"),
+              ("Ran 67 tests", "Ran 76 tests"),
+              ("ranked-relative-confidence", "ranked-product-dominant"),
+              ("--seeds', '6001,6002'", "--seeds', '6101,6102'"),
+          ]
+          for old, new in replacements:
+              if old not in script:
+                  raise AssertionError('expected audit template token missing: ' + old[:100])
+              script = script.replace(old, new)
+
+          # The broad GDM60->GDM61 template conversion must not rewrite receipts
+          # for the previous canonical experiment. Repair those names explicitly.
+          script = script.replace('CANONICAL_GDM61_SOURCE', 'CANONICAL_GDM60_SOURCE')
+          script = script.replace('CANONICAL_GDM61_AUDIT', 'CANONICAL_GDM60_AUDIT')
+          script = script.replace('canonical_gdm61_source_commit', 'canonical_gdm60_source_commit')
+          script = script.replace('canonical_gdm61_audit_run', 'canonical_gdm60_audit_run')
+
+          # Independently bind exact fixed product/delta block-scale receipts in
+          # addition to followup61.collect's own verifier.
+          import_line = 'from experiments.followup61.run import _representation_description, BLOCK_SCALES'
+          assert import_line in script
+          measured_anchor = "require(training.get('gdm61_semantic_representation') == _representation_description(arm), 'semantic representation receipt mismatch')"
+          assert measured_anchor in script
+          script = script.replace(
+              measured_anchor,
+              measured_anchor + "\n    expected_product_scale, expected_delta_scale = BLOCK_SCALES[arm]\n    require(float(training.get('gdm61_product_scale', -1)) == float(expected_product_scale), 'product block scale receipt mismatch')\n    require(float(training.get('gdm61_delta_scale', -1)) == float(expected_delta_scale), 'delta block scale receipt mismatch')",
+              1,
+          )
+          smoke_anchor = "require(training.get('gdm61_representation_mode') == 'ranked-product-dominant', 'wrong representation smoke mode')"
+          assert smoke_anchor in script
+          script = script.replace(
+              smoke_anchor,
+              smoke_anchor + "\n    require(float(training.get('gdm61_product_scale', -1)) == 1.0, 'wrong smoke product scale')\n    require(float(training.get('gdm61_delta_scale', -1)) == 0.5, 'wrong smoke delta scale')",
+              1,
+          )
+
+          # Guard against accidental GDM60 source-run constants surviving the
+          # transformation while allowing explicit canonical-GDM60 receipts.
+          assert "gdm61-reproducibility-audit-v1" in script
+          assert "gdm61-batch-report-v1" in script
+          assert "experiments.followup61.collect" in script
+          assert "SEEDS = (6101, 6102)" in script
+          assert "fixed-ranked-request-interaction-block-balance" in script
+          assert "10786971655" in script and "10784817334" in script
+          assert "107463262884" in script and "107448426413" in script
+
+          Path('audit-output/generated-audit.py').write_text(script + '\n')
+          code = compile(script, 'generated-gdm61-audit.py', 'exec')
+          exec(code, {'__name__': '__main__'})
+          BOOTSTRAP
+      - name: Upload reproducibility audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdm61-reproducibility-${{ github.run_id }}
+          path: audit-output/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
