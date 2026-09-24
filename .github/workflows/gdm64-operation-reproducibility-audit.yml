@@ -20,6 +20,7 @@ jobs:
     env:
       SOURCE_RUN: '35995968508'
       SOURCE_SHA: 6fe0f89630324fa18c18175c1d7c64ba614a1cff
+      AUDIT_DRIVER_REPAIR: 39b97e44a822c1a6d31812af88fb8ae62b2885c7
       GH_TOKEN: ${{ github.token }}
       OMP_NUM_THREADS: '1'
       MKL_NUM_THREADS: '1'
