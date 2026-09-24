@@ -71,15 +71,29 @@ class GDM61Contracts(unittest.TestCase):
         torch.testing.assert_close(first, expected_first, rtol=0.0, atol=0.0)
         torch.testing.assert_close(second, expected_second, rtol=0.0, atol=0.0)
 
-    def test_endpoint_arms_exactly_match_gdm60_factorizations(self):
+    def test_endpoint_arms_preserve_gdm60_factorized_content_with_fixed_block_slots(self):
         q = torch.tensor([0.2, -0.4])
         candidates = torch.tensor([[0.5, 0.1], [0.1, -0.2], [-0.3, 0.7]])
         weights = torch.tensor([0.6, 0.25, 0.15])
-        for mode in ("ranked-product-only", "ranked-delta-only"):
-            left = run._balance_blocks(q, candidates, weights, mode)
-            right = g60._confidence_blocks(q, candidates, weights, mode)
-            torch.testing.assert_close(left[0], right[0], rtol=0.0, atol=0.0)
-            torch.testing.assert_close(left[1], right[1], rtol=0.0, atol=0.0)
+
+        # Product-only already occupies the product slot in GDM60, so the endpoint is
+        # coordinate-identical as well as semantically identical.
+        product_left = run._balance_blocks(q, candidates, weights, "ranked-product-only")
+        product_right = g60._confidence_blocks(q, candidates, weights, "ranked-product-only")
+        torch.testing.assert_close(product_left[0], product_right[0], rtol=0.0, atol=0.0)
+        torch.testing.assert_close(product_left[1], product_right[1], rtol=0.0, atol=0.0)
+
+        # GDM60's diagnostic delta-only arm packed delta evidence into its first generic
+        # slot. GDM61 deliberately keeps product and delta in fixed slots across the
+        # whole interpolation family, so delta-only must preserve the exact GDM60 delta
+        # values while placing them in the dedicated second (delta) slot. This is a
+        # contract-test correction only; the GDM61 model representation is unchanged.
+        delta_left = run._balance_blocks(q, candidates, weights, "ranked-delta-only")
+        delta_right = g60._confidence_blocks(q, candidates, weights, "ranked-delta-only")
+        zeros = torch.zeros_like(delta_right[0])
+        torch.testing.assert_close(delta_left[0], zeros, rtol=0.0, atol=0.0)
+        torch.testing.assert_close(delta_left[1], delta_right[0], rtol=0.0, atol=0.0)
+        torch.testing.assert_close(delta_right[1], zeros, rtol=0.0, atol=0.0)
 
     def test_intermediate_arms_scale_only_declared_block(self):
         q = torch.tensor([0.2, -0.4])
