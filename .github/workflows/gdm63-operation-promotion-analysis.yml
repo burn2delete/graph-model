@@ -1,0 +1,183 @@
+name: GDM63 operation-only promotion analysis
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/gdm63-operation-promotion-analysis.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: graph-model-gdm63-operation-analysis
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_RUN: '35976527471'
+      SOURCE_SHA: 43a6d16652a3fd63c155f46e99b42c757c7601a1
+      SOURCE_OPERATION_ARTIFACT: '10799480293'
+      SOURCE_OPERATION_DIGEST: sha256:07e991bbfffdeeaefd45a65e66782fbf19b5ce24889ab9d5f717d4cd7f515050
+      PASS_AUDIT_RUN: '35988393672'
+      PASS_AUDIT_SHA: 53ac6ec72857d195b2f74f0975944525e388df55
+      PASS_BATCH_ARTIFACT: '10803551517'
+      PASS_BATCH_DIGEST: sha256:732210dbecfa54d0afb738dde1cc9b2d9d50a4a691fe8a2f16bf1df8da61d25a
+      PASS_AUDIT_ARTIFACT: '10803611438'
+      PASS_AUDIT_DIGEST: sha256:f3c0e7e86665cfac54f14b3c81bb04de16fc9e6d3ad76a830935f1836234a6a7
+      GH_TOKEN: ${{ github.token }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build verified GDM63 operation-only promotion analysis
+        run: |
+          set -euo pipefail
+          mkdir -p analysis
+          python -u - <<'PY'
+          import collections
+          import hashlib
+          import json
+          import os
+          import stat
+          import subprocess
+          import zipfile
+          from pathlib import Path, PurePosixPath
+
+          REPO='burn2delete/graph-model'
+          SOURCE_RUN=int(os.environ['SOURCE_RUN'])
+          SOURCE_SHA=os.environ['SOURCE_SHA']
+          PASS_RUN=int(os.environ['PASS_AUDIT_RUN'])
+          PASS_SHA=os.environ['PASS_AUDIT_SHA']
+          OUT=Path('analysis')
+          FAMILIES={'role','lifecycle-time','representation','object-vs-supplier'}
+
+          def api(path):
+              return json.loads(subprocess.check_output(['gh','api',f'repos/{REPO}/{path}']))
+          def sha256(path):
+              h=hashlib.sha256()
+              with Path(path).open('rb') as f:
+                  for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+              return h.hexdigest()
+          def require(c,m):
+              if not c: raise AssertionError(m)
+          def download(artifact_id,digest,run,sha,name):
+              meta=api(f'actions/artifacts/{artifact_id}')
+              require(meta.get('digest')==digest,name+' metadata digest mismatch')
+              require(meta.get('expired') is False,name+' expired')
+              wr=meta.get('workflow_run') or {}
+              require(wr.get('id')==run and wr.get('head_sha')==sha,name+' run/sha mismatch')
+              p=OUT/(name+'.zip')
+              with p.open('wb') as f:
+                  subprocess.run(['gh','api',f'repos/{REPO}/actions/artifacts/{artifact_id}/zip'],stdout=f,check=True)
+              require('sha256:'+sha256(p)==digest,name+' downloaded digest mismatch')
+              return p,meta
+
+          op_zip,_=download(int(os.environ['SOURCE_OPERATION_ARTIFACT']),os.environ['SOURCE_OPERATION_DIGEST'],SOURCE_RUN,SOURCE_SHA,'source-operation')
+          batch_zip,_=download(int(os.environ['PASS_BATCH_ARTIFACT']),os.environ['PASS_BATCH_DIGEST'],PASS_RUN,PASS_SHA,'passing-batch')
+          audit_zip,_=download(int(os.environ['PASS_AUDIT_ARTIFACT']),os.environ['PASS_AUDIT_DIGEST'],PASS_RUN,PASS_SHA,'passing-audit')
+
+          with zipfile.ZipFile(batch_zip) as z:
+              names=z.namelist(); require(len(names)==1 and names[0].endswith('ATTEMPT1_OPERATION_BATCH_REPORT.json'),'unexpected passing batch archive')
+              batch=json.loads(z.read(names[0]))
+          require(batch.get('format')=='gdm63-operation-batch-report-v1','wrong batch format')
+          require(batch.get('forward_scope')=='operation-generation-only','wrong batch scope')
+          require(batch.get('complete') is True and batch.get('verified') is True,'passing batch not verified')
+          require(batch.get('expected_results')==10 and batch.get('verified_results')==10,'passing batch not 10/10')
+          require(batch.get('schema_configs_compared')==0,'schema configs leaked into batch')
+          require(batch.get('source_commit')==SOURCE_SHA,'passing batch source mismatch')
+          require(all(r.get('task')=='operation' for r in batch.get('aggregates',[])),'schema aggregate leaked')
+
+          with zipfile.ZipFile(audit_zip) as z:
+              candidates=[n for n in z.namelist() if n.endswith('REPRODUCIBILITY_REPORT.json')]
+              require(len(candidates)==1,'missing/duplicate audit report')
+              audit=json.loads(z.read(candidates[0]))
+          require(audit.get('format')=='gdm63-operation-reproducibility-audit-v1','wrong audit format')
+          require(audit.get('complete') is True and audit.get('evidence_verified') is True and audit.get('reproducible') is True and audit.get('promotion_eligible') is True,'audit gate failed')
+          require(audit.get('errors')==[],'audit has errors')
+          require(audit.get('expected_operation_configs')==10 and audit.get('matched_operation_configs')==10,'audit not 10/10')
+          require(audit.get('schema_configs_compared')==0,'schema configs leaked into audit')
+          require(len(audit.get('comparisons',[]))==10 and all(x.get('exact_match') and x.get('differing_fields')==[] for x in audit['comparisons']),'audit comparisons not exact')
+
+          summaries=[]
+          with zipfile.ZipFile(op_zip) as z:
+              for info in z.infolist():
+                  p=PurePosixPath(info.filename)
+                  require(not p.is_absolute() and '..' not in p.parts,'unsafe source archive path')
+                  require(not stat.S_ISLNK(info.external_attr >> 16),'source archive symlink')
+                  if info.filename.endswith('/summary.json') or info.filename=='summary.json':
+                      s=json.loads(z.read(info))
+                      cfg=s.get('config',{})
+                      if cfg.get('task')=='operation' and cfg.get('backbone')=='distilbert' and int(s.get('seed',-1)) in (6301,6302):
+                          summaries.append(s)
+          require(len(summaries)==10,f'expected 10 operation summaries, got {len(summaries)}')
+          arms=sorted({s['config']['arm'] for s in summaries})
+          require(len(arms)==5,'expected five arms')
+          require({int(s['seed']) for s in summaries}=={6301,6302},'seed set mismatch')
+          require(len({(s['config']['arm'],int(s['seed'])) for s in summaries})==10,'duplicate/missing arm-seed')
+
+          def metrics(s,field):
+              d=s[field]; require('operation' in d,field+' missing operation'); return d['operation']
+          def div(a,b): return (a/b) if b else None
+
+          per_seed=[]
+          family_by_arm={a:{f:{'correct':0,'total':0,'predicted_statuses':collections.Counter()} for f in sorted(FAMILIES)} for a in arms}
+          for s in sorted(summaries,key=lambda x:(x['config']['arm'],int(x['seed']))):
+              arm=s['config']['arm']; seed=int(s['seed']); h=metrics(s,'secondary_holdout_metrics'); c=s['secondary_holdout_clause_metrics']; r=metrics(s,'regression_metrics')
+              fam=s['secondary_holdout_ambiguity_family_metrics']; require(set(fam)==FAMILIES,'family set mismatch')
+              for f,v in fam.items():
+                  family_by_arm[arm][f]['correct'] += int(v.get('correct',0)); family_by_arm[arm][f]['total'] += int(v.get('total',0)); family_by_arm[arm][f]['predicted_statuses'].update(v.get('predicted_statuses',{}))
+              per_seed.append({
+                  'arm':arm,'seed':seed,
+                  'answerable_accuracy':div(int(h['answerable_correct']),int(h['answerable'])),
+                  'risk_accuracy':div(int(h['risk_correct']),int(h['risk_cases'])),
+                  'incorrect_publication_rate':div(int(h['incorrect_publications']),int(h['examples'])),
+                  'target_precision':c.get('target_precision'),'target_recall':c.get('target_recall'),
+                  'regression_accuracy':float(r['accuracy']),
+                  'p50_ms':s['generation_latency']['p50_ms'],'p95_ms':s['generation_latency']['p95_ms'],
+                  'rss_kib':s['memory']['rss_after_evaluation_kib'],
+                  'families':fam,
+              })
+
+          seed_stability=[]
+          for arm in arms:
+              rows=[x for x in per_seed if x['arm']==arm]; require(len(rows)==2,'seed rows mismatch')
+              a,b=rows
+              seed_stability.append({'arm':arm,'seed6301':a,'seed6302':b,'absolute_deltas':{
+                  k:abs(float(a[k])-float(b[k])) for k in ('answerable_accuracy','risk_accuracy','incorrect_publication_rate','target_precision','target_recall','regression_accuracy')
+              }})
+
+          pooled_families={}
+          for arm,fd in family_by_arm.items():
+              pooled_families[arm]={}
+              for fam,v in fd.items():
+                  pooled_families[arm][fam]={'correct':v['correct'],'total':v['total'],'accuracy':div(v['correct'],v['total']),'predicted_statuses':dict(v['predicted_statuses'])}
+
+          aggregate_by_arm={r['arm']:r for r in batch['aggregates']}
+          report={
+              'format':'gdm63-operation-promotion-analysis-v1',
+              'source_run':SOURCE_RUN,'source_commit':SOURCE_SHA,
+              'source_operation_artifact':int(os.environ['SOURCE_OPERATION_ARTIFACT']),'source_operation_digest':os.environ['SOURCE_OPERATION_DIGEST'],
+              'passing_audit_run':PASS_RUN,'passing_audit_commit':PASS_SHA,
+              'passing_operation_batch_artifact':int(os.environ['PASS_BATCH_ARTIFACT']),'passing_operation_batch_digest':os.environ['PASS_BATCH_DIGEST'],
+              'passing_audit_artifact':int(os.environ['PASS_AUDIT_ARTIFACT']),'passing_audit_digest':os.environ['PASS_AUDIT_DIGEST'],
+              'operation_configs_analyzed':10,'schema_configs_analyzed':0,
+              'batch_aggregates':aggregate_by_arm,'per_seed':per_seed,'seed_stability':seed_stability,'pooled_ambiguity_families':pooled_families,
+              'limits':['Docket/Portfolio is synthetic secondary holdout and becomes regression-only after this inspection.','Timing and RSS are hosted-runner observational values; RSS is process-level, not isolated model memory.','Cross-batch holdouts are not a causal leaderboard.'],
+          }
+          (OUT/'PROMOTION_ANALYSIS.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(report,indent=2,sort_keys=True))
+          PY
+          test -s analysis/PROMOTION_ANALYSIS.json
+      - name: Upload promotion analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdm63-operation-promotion-analysis-${{ github.run_id }}
+          path: analysis/PROMOTION_ANALYSIS.json
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
