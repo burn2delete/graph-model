@@ -283,7 +283,7 @@ def _representation_receipt(bundle, mode: str, encoder_dim: int, directory: Path
         "gdm63_changed_interaction_parameter_tensors": sorted(changed),
         "gdm63_rank_preserving": True,
         "gdm63_change_scope": (
-            "small learned ambiguity-head interaction over fixed canonical top5 request-relative slots only; operation task only; fixed capability training, GDM56 family-balanced curriculum, canonical numerical path and GDM54 5pp rescue arbitration"
+            "operation-only small learned rank-preserving cross-candidate ambiguity interaction over fixed canonical q*ci+abs(q-ci) top5 slots; matched architecture/parameter count across all five arms; fixed capability training, GDM56 family-balanced curriculum, canonical numerical path and GDM54 5pp rescue arbitration"
         ),
         "canonical_gdm62_source_commit": CANONICAL_GDM62_SOURCE,
         "canonical_gdm62_audit_run": CANONICAL_GDM62_AUDIT_RUN,
