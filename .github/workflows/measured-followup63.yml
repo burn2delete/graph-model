@@ -1,0 +1,201 @@
+name: GDM63 learned rank-preserving cross-candidate operation evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - experiments/followup63/**
+      - .github/workflows/measured-followup63.yml
+  workflow_dispatch:
+    inputs:
+      seeds:
+        default: '6301,6302'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: graph-model-gdm63-measured
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  APOLLO_ELV2_LICENSE: accept
+  APOLLO_TELEMETRY_DISABLED: 'true'
+  HF_HUB_DISABLE_TELEMETRY: '1'
+  TOKENIZERS_PARALLELISM: 'false'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_DYNAMIC: 'FALSE'
+  MKL_DYNAMIC: 'FALSE'
+  MKL_CBWR: COMPATIBLE
+  ATEN_CPU_CAPABILITY: default
+  PYTHONHASHSEED: '0'
+  PYTHONUNBUFFERED: '1'
+  SEEDS: ${{ inputs.seeds || '6301,6302' }}
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Compile and test GDM63 operation-only learned-interaction contracts
+        run: |
+          set -euo pipefail
+          python -m compileall -q experiments/followup63
+          python -m unittest experiments.followup63.test_followup experiments.followup62.test_followup experiments.followup61.test_followup experiments.followup60.test_followup experiments.followup59.test_followup experiments.followup58.test_followup experiments.followup57.test_followup experiments.followup56.test_followup experiments.followup55.test_followup experiments.followup54.test_followup experiments.followup53.test_followup experiments.followup52.test_followup experiments.followup51.test_followup experiments.followup50.test_cache_repair -v 2>&1 | tee artifacts/tests.log
+      - name: Train and independently verify learned cross-candidate smoke policy
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup63.execute --backbone hash --task operation --arms learned-allpairs-cross --seeds 6301 --epochs 2 --output artifacts/smoke 2>&1 | tee artifacts/smoke.log
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from experiments.followup63.collect import verify_summary
+          from experiments.followup63 import run
+
+          summaries=list(Path('artifacts/smoke').rglob('summary.json'))
+          assert len(summaries)==1, summaries
+          summary=verify_summary(summaries[0])[0]
+          assert summary['config']['task']=='operation'
+          assert summary['config']['forward_scope']=='operation-generation-only'
+          assert summary['config']['schema_generation']=='suspended-frozen'
+          h=summary['encoder']['head_training_reproducibility']
+          assert h['adamw_foreach'] is False and h['adamw_fused'] is False
+          assert h['clip_grad_norm_foreach'] is False
+          assert h['moment_update_dtype']=='float32'
+          assert h['final_parameter_application_dtype']=='float64->float32'
+          assert h['stored_parameter_dtype']=='float32'
+          assert h['feature_quantum_unchanged']==1e-4
+          assert h['gdm63_execution_scope']=='operation_capability_and_ambiguity_heads_only'
+          assert h['schema_generation_scope']=='suspended-frozen'
+          assert h['canonical_gdm62_source_commit']=='a3cfa70a570f931e2c78553ca9d72aeb5ed65e79'
+          assert h['canonical_gdm62_audit_run']==35965921793
+          tr=summary['training']
+          assert tr['gdm63_interaction_mode']=='learned-allpairs-cross'
+          assert tr['gdm63_requested_topk']==5
+          assert tr['gdm63_ambiguity_feature_dim']==1291
+          assert tr['gdm63_rank_preserving'] is True
+          assert tr['gdm63_latent_width']==4
+          assert tr['gdm63_interaction_parameter_count']==run.interaction_parameter_count(128)
+          assert tr['gdm63_initial_interaction_hash']!=tr['gdm63_selected_interaction_hash']
+          assert 'ambiguity.proj.weight' in tr['gdm63_changed_interaction_parameter_tensors']
+          assert tr['canonical_gdm62_source_commit']=='a3cfa70a570f931e2c78553ca9d72aeb5ed65e79'
+          assert tr['canonical_gdm62_audit_run']==35965921793
+          assert tr['gdm56_ambiguity_curriculum']=='family-balanced'
+          families=tr['gdm56_positive_family_counts']
+          assert set(families)=={'role','lifecycle-time','representation','object-vs-supplier'}
+          assert max(families.values())-min(families.values()) <= 1
+          assert tr['gdm56_counterfactual_negative_fraction']==0.0
+          cal=json.loads((summaries[0].parent/'calibration.json').read_text())['selected']
+          assert cal['threshold_selection']=='ambiguity-rescue'
+          assert cal['status_arbitration']=='ambiguity-rescue'
+          assert cal['nomatch_recall_budget_pp']==5
+          holdout=summary['secondary_holdout_ambiguity_family_metrics']
+          assert set(holdout)=={'role','lifecycle-time','representation','object-vs-supplier'}
+          print('gdm63 deterministic operation-only smoke and matched-capacity learned-interaction contract verified')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm63-preflight-${{ github.run_id }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+  operation:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: gdm57-hf-${{ runner.os }}-distilbert-v1
+      - name: Install CPU model dependencies and Rover
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts "$HOME/.local/bin" /tmp/rover-install
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
+          tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          python -m pip freeze > artifacts/packages.txt
+      - name: Train learned candidate interactions, execute GraphQL operations, and measure
+        run: |
+          set -euo pipefail
+          GITHUB_ACTIONS=true python -m experiments.followup63.execute --backbone distilbert --task operation --seeds "$SEEDS" --epochs 12 --output artifacts/results 2>&1 | tee artifacts/run.log
+          test -s artifacts/results/worker.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm63-worker-${{ github.run_id }}-operation
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 3
+  verify-batch:
+    needs: [preflight, operation]
+    if: always() && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gdm63-worker-${{ github.run_id }}-operation
+          path: collected
+      - name: Independently verify GDM63 operation evidence and reproduce metrics
+        run: |
+          set -euo pipefail
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0
+          python -m pip install -r experiments/measured/requirements.txt
+          python -m experiments.followup63.collect collected --seeds "$SEEDS" --tasks operation 2>&1 | tee collection.log
+          test -s collected/BATCH_REPORT.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('collected/BATCH_REPORT.json').read_text())
+          assert report['format']=='gdm63-operation-batch-report-v1'
+          assert report['forward_scope']=='operation-generation-only'
+          assert report['schema_configs_compared']==0
+          assert report['complete'] is True and report['verified'] is True
+          assert report['expected_results']==10 and report['verified_results']==10
+          assert not report['missing_results'] and not report['unexpected_results'] and not report['failed_results']
+          print('gdm63 operation-only 10/10 independent batch verification passed')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gdm63-operation-batch-report-${{ github.run_id }}
+          path: |
+            collected/BATCH_REPORT.json
+            collection.log
+          if-no-files-found: error
+          retention-days: 14
