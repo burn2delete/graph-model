@@ -8,14 +8,14 @@ The measured system is deliberately narrower than a general-purpose GraphQL gene
 
 ## Current research state
 
-_Last synchronized: 2026-09-23. Latest canonical experiment: GDM60._
+_Last synchronized: 2026-09-24. Latest canonical experiment: GDM61._
 
 | State | Meaning |
 | --- | --- |
-| **Canonical through GDM60** | GDM50–GDM60 each have repeated measured evidence plus a passing exact-attempt reproducibility audit. Canonical means usable reproducible evidence under the declared contract; it does **not** mean every tested arm is a winning architecture. |
-| **Latest supported result** | GDM60 shows that simple capability-confidence scaling of the GDM59 rank-preserving request-relative representation is **negative** on the fresh holdout: it improves neither task’s answerable/safety tradeoff. Factorizing the representation is task-sensitive: the request/candidate product block is much more useful for operations, while the absolute request/candidate delta block is the strongest schema factorization and slightly improves the within-batch schema control on every aggregate metric except AMBIGUOUS, which is unchanged. |
-| **Remaining tradeoff** | Operation `ranked-product-only` recovers substantial answerable/recall and multi-clause correctness but gives back some risk/publication safety. Schema `ranked-delta-only` gives only a small aggregate gain. Name-vs-ID, role, and lifecycle semantic confusions remain. |
-| **Next unverified hypothesis** | The next bounded question is whether a **fixed balance between the rank-preserving product and delta blocks** can retain the operation product signal and schema delta signal without the severe recall loss caused by capability-confidence weighting. This is not yet a result. |
+| **Canonical through GDM61** | GDM50–GDM61 each have repeated measured evidence plus a passing exact-attempt reproducibility audit. Canonical means usable reproducible evidence under the declared contract; it does **not** mean every tested arm is a winning architecture. |
+| **Latest supported result** | GDM61 is a **negative/inconclusive fixed-scaling result**. Fixed nonzero product/delta block balances do not improve the answerable/safety frontier on fresh `Voucher` / `Anthology`. The strong GDM60 operation product-only endpoint does not replicate on this fresh holdout. Schema delta-only improves safety/ambiguity versus the balanced control without improving answerable accuracy or target recall. |
+| **Remaining tradeoff** | Operation product-dominant has the best GDM61 answerable/recall aggregate but loses risk/publication/AMBIGUOUS safety. Schema delta-only is the strongest safety endpoint but ties the balanced control on answerable/recall. Three-clause operation correctness is 0/16 for every arm, and role plus name-vs-ID confusions remain. Seed sensitivity is substantial, especially for schema. |
+| **Next unverified hypothesis** | Fixed rescaling mostly changes optimization geometry rather than representation content. The next bounded question is whether **explicit rank-preserving candidate-to-candidate semantic contrast** adds ambiguity information that the current request-relative blocks do not expose directly. This is not yet a result. |
 | **Invalid historical evidence** | Original GDM41–44 jobs wrote manifests and fabricated/simulated metrics. Their promotions are withdrawn. Only measured repair run `35565425124` (196/196 verified) is the valid GDM41–44 baseline. |
 
 Read [`experiments/MEASUREMENT_POLICY.md`](experiments/MEASUREMENT_POLICY.md) and [`experiments/measured/REPAIR.md`](experiments/measured/REPAIR.md) before interpreting results or changing experiments.
@@ -83,21 +83,25 @@ Unsupported requests can therefore train toward NONE rather than being forced on
 
 ### Learned ambiguity head
 
-GDM51 introduced a separate clause-local ambiguity discriminator after capability training. GDM57 established useful semantic ambiguity signal; GDM58 showed that simply widening a fixed pooled summary is not enough; GDM59 showed that preserving top-five rank in request-relative interactions is materially better than pooling.
+GDM51 introduced a separate clause-local ambiguity discriminator. GDM57 established useful request-conditioned semantic ambiguity signal; GDM58 showed simple pooled breadth is not enough; GDM59 showed preserving top-five rank in request-relative interactions materially improves useful signal.
 
-GDM60 keeps **top-five candidate breadth, rank preservation, and the same ambiguity-head capacity** (`11 + 10*d`, or 7,691 DistilBERT inputs) in every arm. It changes only the factorization/scaling of the two request-relative semantic blocks:
+GDM60 factorized the canonical GDM59 request-relative representation and showed that simple capability-confidence weighting is negative. Product interaction `q*c_i` was the strongest operation factorization on that batch, while absolute request/candidate delta `abs(q-c_i)` was the strongest schema factorization.
 
-- `ranked-request-control`: canonical GDM59 `q*c_i` plus `abs(q-c_i)` blocks;
-- `ranked-product-only`: `q*c_i` with a zero-filled delta block;
-- `ranked-delta-only`: `abs(q-c_i)` with a zero-filled product block;
-- `ranked-confidence-weighted`: both blocks scaled by candidate capability probability `p_i`;
-- `ranked-relative-confidence`: both blocks scaled by clipped `p_i/p_1`, preserving rank-1 scale while attenuating lower-confidence ranks.
+GDM61 keeps **top-five candidate breadth, rank preservation, and exactly the same ambiguity-head capacity** (`11 + 10*d`, or 7,691 DistilBERT inputs) in every arm. It assigns fixed semantic coordinates—five ranked product slots followed by five ranked absolute-delta slots—and changes only deterministic block scales:
 
-Missing ranks are zero-padded. Capability training/ranking, the GDM56 family-balanced ambiguity curriculum, GDM54 rescue calibration, numerical execution, and deterministic GraphQL realization are fixed. GDM60 therefore isolates **request-relative representation factorization/confidence scaling**, not candidate breadth, head size, curriculum, or backbone.
+- `ranked-product-only`: product `1.0`, delta `0.0`;
+- `ranked-product-dominant`: product `1.0`, delta `0.5`;
+- `ranked-balanced-control`: product `1.0`, delta `1.0`;
+- `ranked-delta-dominant`: product `0.5`, delta `1.0`;
+- `ranked-delta-only`: product `0.0`, delta `1.0`.
+
+Product-only is coordinate-identical to the GDM60 product endpoint. GDM60's diagnostic delta-only packed delta into its first generic slot; GDM61 preserves the same delta values in the dedicated second block, so it is **semantic-content-equivalent, not coordinate-identical**. Missing ranks are zero-padded. Capability training/ranking, the GDM56 family-balanced ambiguity curriculum, GDM54 rescue calibration, numerical execution, and deterministic GraphQL realization stay fixed.
+
+Because the ambiguity head begins with learned affine transformations, nonzero deterministic feature rescaling can often be reabsorbed by learned weights. GDM61 therefore provides evidence about the measured optimization/regularization behavior of these fixed scales, not proof that a particular numerical scale is intrinsically semantic.
 
 ### Validation-only arbitration
 
-The capability and ambiguity heads are optimizer-trained. Thresholds and request arbitration are not. Validation-only calibration chooses NONE and ambiguity thresholds; the line retains the GDM54 high-confidence ambiguity-rescue policy with a 5 percentage-point NO_MATCH-recall budget and accepted-status recall guardrail.
+Capability and ambiguity heads are optimizer-trained. Thresholds and request arbitration are not. Validation-only calibration chooses NONE and ambiguity thresholds; the line retains the GDM54 high-confidence ambiguity-rescue policy with a 5 percentage-point NO_MATCH-recall budget and accepted-status recall guardrail.
 
 Request aggregation is deterministic: a remaining NO_MATCH clause rejects the request; otherwise any AMBIGUOUS clause makes the request ambiguous; otherwise selected paths are emitted.
 
@@ -116,61 +120,72 @@ Accepted schema capabilities are projected into minimal SDL/subgraphs with deter
 | GDM50 | Explicit NONE supplies an open-set unsupported outcome, but does not solve ambiguity or multi-clause compounding. Numerical diagnostics exposed cross-run optimizer drift. | Keep explicit NONE and the hardened numerical contract. |
 | GDM51 | A separate ambiguity discriminator improves capability-vs-risk decomposition. | Ambiguity deserves a learned component; representation matters. |
 | GDM52–54 | Calibration/arbitration expose precision/recall tradeoffs; threshold ordering alone cannot repair weak ambiguity evidence. | Keep calibration effects separate from representation capability. |
-| GDM55–56 | Semantic curriculum diversity and family balance matter, especially for operation ambiguity, but more curriculum is not monotonic and counterfactual-negative arms can collapse ambiguity recovery. | Curriculum alone is not the missing representation. |
-| GDM57 | Request-conditioned top-two semantics sharply improve AMBIGUOUS recovery; combined candidate+request semantics improve schema risk balance. | Useful semantic signal exists, but top-two evidence still trades AMBIGUOUS against NO_MATCH/publication safety. |
-| GDM58 | Wider top-k evidence through the same pooled representation produces almost no operation benefit and does not improve schema answerable/ambiguity tradeoff over top-2. | Simple pooled breadth is negative/inconclusive. |
-| GDM59 | Rank-preserving top-five request interactions outperform the matched pooled control on answerable correctness/recall while retaining strong ambiguity recovery. | Rank identity helps through request-relative interaction, not raw candidate slots; publication and semantic-confusion tradeoffs remain. |
-| **GDM60** | **Simple capability-confidence weighting of ranked request interactions loses substantial answerable recall. The product block is the strongest operation factorization; the delta block is the strongest schema factorization and slightly improves the within-batch schema request-control across aggregate accuracy/safety/precision/recall metrics.** | **Confidence attenuation is negative under this contract. Product-vs-delta usefulness is task-sensitive, but the schema delta gain is small and neither factorization solves semantic families or multi-clause correctness.** |
+| GDM55–56 | Semantic curriculum diversity and family balance matter, but more curriculum is not monotonic. | Curriculum alone is not the missing representation. |
+| GDM57 | Request-conditioned top-two semantics sharply improve AMBIGUOUS recovery. | Useful semantic signal exists, but top-two evidence still trades AMBIGUOUS against NO_MATCH/publication safety. |
+| GDM58 | Wider top-k evidence through the same pooled representation produces almost no operation benefit and no schema answerable/ambiguity improvement over top-2. | Simple pooled breadth is negative/inconclusive. |
+| GDM59 | Rank-preserving top-five request interactions outperform the matched pooled control on answerable correctness/recall while retaining strong ambiguity recovery. | Rank identity helps through request-relative interaction, not raw candidate slots. |
+| GDM60 | Simple capability-confidence weighting loses substantial answerable recall; product-only is strongest for operation on that batch, delta-only strongest for schema. | Confidence attenuation is negative; factorization signal is task-sensitive and limited. |
+| **GDM61** | **Fixed product/delta scaling does not produce a better within-batch answerable/safety frontier. The GDM60 operation product-only endpoint does not replicate on fresh Voucher/Anthology; schema delta-only improves risk/AMBIGUOUS safety but not answerable/recall. Seed variance remains large.** | **Treat fixed block balance as negative/inconclusive. Do not choose a task architecture from GDM60/GDM61 cross-holdout differences. Move to genuinely new candidate-relational information rather than more scalar rescaling.** |
 
-# Latest canonical result: GDM60
+# Latest canonical result: GDM61
 
-GDM60 changes **only the request-relative semantic factorization/confidence scaling supplied to the learned ambiguity head**. Every arm sees the same top-five candidates, preserves candidate rank, uses the same 7,691-input head capacity, and keeps explicit NONE, capability training, the GDM56 family-balanced ambiguity curriculum, frozen DistilBERT, the `1e-4` feature boundary, canonical numerical execution, GDM54 rescue arbitration, and deterministic GraphQL/Federation realization fixed.
+GDM61 changes **only fixed scaling and coordinate discipline of the two rank-preserving request-relative semantic blocks supplied to the learned ambiguity head**. Every arm sees the same top-five real candidates, uses the same 7,691-input capacity and parameter count, keeps explicit NONE and the same capability model, exact GDM56 family-balanced ambiguity curriculum, frozen DistilBERT, `1e-4` feature boundary, canonical numerical execution, GDM54 validation-only rescue arbitration, and deterministic GraphQL/Federation realization.
 
-## GDM60 data and denominators
+## GDM61 data and denominators
 
-`Pass` / `Logbook` are calibration-only. `Certificate` / `Manuscript` are the fresh GDM60 secondary holdout and are now **regression-only** for subsequent work. GDM46–GDM59 inspected holdouts also remain regression-only.
+`Badge` / `Journal` are calibration-only. `Voucher` / `Anthology` are the fresh GDM61 secondary holdout and are now **regression-only** for subsequent work. GDM46–GDM60 inspected holdouts also remain regression-only.
 
-Each task has **84 unique secondary-holdout cases**: 36 answerable, 32 NO_MATCH, and 16 AMBIGUOUS. Rates are means over seeds `6001,6002`. Status counts pool those seeds: for example, `22/32` AMBIGUOUS represents sixteen unique ambiguous cases evaluated by two independently initialized models, not thirty-two independent semantic worlds. The exact same-source rerun is reproducibility evidence and does not add semantic cases.
+Each task has **84 unique secondary-holdout cases**: 36 answerable and 48 risk cases, consisting of 32 NO_MATCH and 16 AMBIGUOUS. Rates below are means over seeds `6101,6102`. Status counts pool those seeds, so `19/32` AMBIGUOUS represents sixteen unique ambiguous cases evaluated by two independently initialized models, and `49/64` NO_MATCH represents thirty-two unique unsupported cases evaluated by two seeds. The exact same-source rerun is reproducibility evidence and does not add semantic cases.
 
-The collector independently recomputes role, lifecycle-time, representation/name-vs-ID, and object-vs-supplier family metrics from per-example predictions, and the exact-attempt audit requires them to match between attempts. The top-level batch report does not pool family values across seeds, so no aggregate family count is invented here. Residual accepted errors directly show name-vs-ID, role, and lifecycle distinctions remain unresolved.
+Clause-count exact-correctness denominators pool seeds: **32 one-clause, 24 two-clause, 16 three-clause** evaluations, corresponding to 16/12/8 unique semantic cases per seed. Reproducibility attempts do not increase those denominators.
+
+The collector computes four ambiguity families—role, lifecycle-time, representation/name-vs-ID, and object-vs-supplier—from per-example predictions. The exact-attempt audit verifies those family metrics exactly between attempts. The top-level batch report intentionally does not pool family values across seeds, so no unsupported aggregate family count is invented here. Accepted role and name-vs-ID errors remain directly visible, so no family is claimed solved.
 
 ## Operation generation
 
 | Representation | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Ranked request control | 23.61% | **59.38%** | **8.33%** | **100.00%** | 18.75% | **19/32** | **38/64** |
-| Ranked product only | **38.89%** | 56.25% | 12.50% | 98.28% | **35.16%** | 16/32 | **38/64** |
-| Ranked delta only | 19.44% | 58.33% | 10.12% | **100.00%** | 14.06% | 18/32 | **38/64** |
-| Capability-confidence weighted | 19.44% | 58.33% | 10.12% | **100.00%** | 14.06% | 18/32 | **38/64** |
-| Relative-confidence weighted | 31.94% | 57.29% | 11.90% | **100.00%** | 26.56% | 17/32 | **38/64** |
+| Product only | 16.67% | 68.75% | 9.52% | **94.12%** | 14.84% | 12/32 | **54/64** |
+| Product dominant | **26.39%** | 63.54% | 13.69% | 88.85% | **25.00%** | 12/32 | 49/64 |
+| Balanced control | 20.83% | 67.71% | 9.52% | 84.12% | 17.97% | **19/32** | 46/64 |
+| Delta dominant | 20.83% | 68.75% | **8.93%** | 84.12% | 17.97% | **19/32** | 47/64 |
+| Delta only | 20.83% | **70.83%** | 9.52% | 84.12% | 17.97% | **19/32** | 49/64 |
 
-`ranked-product-only` is the strongest operation answerable/recall factorization: versus the within-batch request-control it gains **15.28 percentage points answerable accuracy** and **16.41 points target recall**. Exact correctness improves from **11/32, 5/24, 1/16** for one-/two-/three-clause requests to **15/32, 10/24, 3/16**. The cost is lower risk accuracy (-3.13 points), higher incorrect publication (+4.17 points), lower target precision (-1.72 points), and AMBIGUOUS recovery falling from 19/32 to 16/32. This is useful factorization evidence, not a free architecture win.
+`ranked-product-dominant` gives the highest operation answerable accuracy and recall, but versus the balanced control it loses **4.17 points risk accuracy**, worsens incorrect publication by **4.17 points**, and drops AMBIGUOUS recovery from **19/32 to 12/32**. It is not a better answerable/safety frontier.
 
-Both confidence-scaled representations are negative for the intended safety hypothesis. Absolute probability weighting collapses operation answerable accuracy to 19.44% and recall to 14.06%; relative confidence recovers some answerable cases but remains below product-only and does not improve risk/publication versus the request-control.
+The GDM60 product-only operation signal does **not** replicate on the fresh GDM61 holdout: product-only is the lowest GDM61 answerable arm at 16.67%. Because the holdout domains differ, this is a robustness warning rather than a causal cross-batch reversal.
 
-The product-only arm still publishes a lifecycle confusion (`updatedAt` as `createdAt`). The stronger answerable result therefore does not establish semantic correctness once a request is accepted.
+Exact one-/two-/three-clause correctness is **13/32, 6/24, 0/16** for product-dominant; **11/32, 4/24, 0/16** for balanced, delta-dominant, and delta-only; and **9/32, 3/24, 0/16** for product-only. No arm solves three-clause operation generation.
+
+Seed sensitivity is material. Product-only answerable correctness is 8/36 for seed 6101 versus 4/36 for seed 6102; product-dominant is 8/36 versus 11/36. The aggregate differences are therefore not stable enough to justify a preferred operation architecture.
+
+Moderator requests are still accepted as author-name paths in multiple arms. Role ambiguity remains unresolved.
 
 ## Schema generation
 
 | Representation | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Ranked request control | 50.00% | 58.33% | 20.24% | 95.12% | 50.78% | **22/32** | 34/64 |
-| Ranked product only | 51.39% | 54.17% | 23.81% | 93.10% | 51.56% | 17/32 | 35/64 |
-| Ranked delta only | **51.39%** | **59.38%** | 19.64% | **95.74%** | **52.34%** | **22/32** | 35/64 |
-| Capability-confidence weighted | 29.17% | 58.33% | **18.45%** | 93.10% | 29.69% | 20/32 | **36/64** |
-| Relative-confidence weighted | 38.89% | 58.33% | 19.05% | 95.12% | 39.06% | 21/32 | 35/64 |
+| Product only | 22.22% | 56.25% | **12.50%** | **94.12%** | 19.53% | 8/32 | **46/64** |
+| Product dominant | 27.78% | 61.46% | 22.02% | 82.58% | 27.34% | 18/32 | 41/64 |
+| Balanced control | **33.33%** | 61.46% | 24.40% | 83.40% | **37.50%** | 20/32 | 39/64 |
+| Delta dominant | **33.33%** | 61.46% | 24.40% | 83.40% | **37.50%** | 20/32 | 39/64 |
+| Delta only | **33.33%** | **63.54%** | 23.21% | 83.40% | **37.50%** | **22/32** | 39/64 |
 
-`ranked-delta-only` is the strongest schema factorization in this batch. Relative to the request-control, it gains **1.39 points answerable accuracy**, **1.04 points risk accuracy**, reduces incorrect publication by **0.60 points**, raises target precision by **0.62 points**, raises recall by **1.56 points**, and improves NO_MATCH from 34/64 to 35/64 while retaining 22/32 AMBIGUOUS. Exact correctness changes from **19/32, 11/24, 6/16** to **19/32, 12/24, 6/16**. The gain is therefore broad but small; it does not justify claiming a solved architecture.
+`ranked-delta-only` is the strongest GDM61 schema safety endpoint: compared with balanced control it keeps answerable accuracy and recall unchanged, improves risk accuracy by **2.08 points**, lowers incorrect publication by **1.19 points**, and raises AMBIGUOUS recovery from **20/32 to 22/32**. It does **not** improve answerable capability, target precision, NO_MATCH, or clause correctness.
 
-`ranked-product-only` reaches the same 51.39% answerable accuracy but loses risk accuracy, precision, publication safety, and AMBIGUOUS recovery. Both confidence-scaled arms substantially reduce answerable recall; their modest publication-rate improvements do not compensate for the lost answerable capability under this contract.
+Balanced, delta-dominant, and delta-only all have exact one-/two-/three-clause correctness **14/32, 8/24, 2/16**. Product-dominant has **13/32, 6/24, 1/16** and product-only **11/32, 5/24, 0/16**. Intermediate fixed balances therefore do not improve multi-clause schema correctness.
 
-Accepted schema errors still include `author.id` published as `author.name` and moderator requests published as author names. GDM60 therefore does not establish resolution of representation/name-vs-ID or role ambiguity, and the aggregate report is insufficient to claim any family solved.
+Schema seed instability is especially large: balanced, delta-dominant, and delta-only each score **8/36 answerable** on seed 6101 versus **16/36** on seed 6102. Product-dominant moves from 8/36 to 12/36. This is a stronger limitation than the small aggregate delta-only safety gain.
+
+Accepted schema confusions include `author.name` versus `author.id` and moderator versus author paths. Representation/name-vs-ID and role families remain unresolved.
 
 ## Regression, holdout, and interpretation limits
 
-All previously inspected suites, including GDM59 `Warranty` / `Dossier` and now GDM60 `Certificate` / `Manuscript`, are **regression-only** for subsequent experiments. They are not a causal cross-batch leaderboard. GDM60 mean regression request accuracy spans approximately **45.27%–48.65% for operation** and **43.41%–47.68% for schema** across arms.
+All inspected suites, including GDM60 `Certificate` / `Manuscript` and now GDM61 `Voucher` / `Anthology`, are **regression-only** for subsequent experiments. They are not a causal cross-batch leaderboard. GDM61 mean regression request accuracy spans approximately **43.29%–48.24% for operation** and **42.60%–47.55% for schema** across arms.
 
-The very different fresh-holdout baseline of GDM60 versus GDM59 is exactly why conclusions are made **within each batch**, not by treating unlike synthetic domains as a longitudinal leaderboard. GDM60 tests only deterministic per-rank block factorization and simple capability-confidence scaling. It does not test learned attention over candidate sets, a new request-global status model, unrestricted GraphQL token generation, or arbitrary schema invention.
+GDM61 tests fixed deterministic scaling of already-present semantic blocks. Since nonzero scale can be compensated by learned first-layer weights, the experiment should not be overinterpreted as a semantic ablation except at true zero endpoints. The fresh-holdout and seed instability further argue against choosing a product/delta mixture from these numbers.
+
+The measured system remains synthetic and catalog-bounded. GDM61 does not test learned candidate-set attention, explicit candidate-to-candidate semantic relations, unrestricted GraphQL token generation, arbitrary schema invention, a request-global trained status model, or transformer fine-tuning.
 
 ## Speed and memory
 
@@ -178,35 +193,35 @@ Attempt 1 mean-per-seed warm-generation measurements are observational:
 
 | Task | p50 range across arms | p95 range across arms | mean RSS-after-evaluation range |
 | --- | ---: | ---: | ---: |
-| Operation | 70.00–70.84 ms | 138.43–139.47 ms | 1,099,514–1,101,642 KiB |
-| Schema | 69.27–70.60 ms | 136.64–139.66 ms | 1,100,334–1,104,810 KiB |
+| Operation | 67.78–72.31 ms | 136.02–141.79 ms | 1,142,246–1,146,080 KiB |
+| Schema | 63.87–64.14 ms | 126.53–127.64 ms | 1,139,878–1,143,852 KiB |
 
-Generation timing covers fresh request-clause encoding, learned-head scoring, deterministic GraphQL realization, and local validation with catalog/NONE vectors cached. Downloads, initial catalog embedding, backend fixture execution, and Rover composition are excluded from these quantiles; composition is recorded separately. RSS is process-level and affected by worker reuse, so it is **not isolated model memory**. Timing/memory are observational and need not bit-match across hosted-runner attempts; deterministic state/predictions do.
+Generation timing covers fresh request-clause encoding, learned-head scoring, deterministic GraphQL realization, and local validation with catalog/NONE vectors cached. Downloads, initial catalog embedding, backend fixture execution, and Rover composition are excluded from these quantiles; composition is recorded separately. RSS is process-level and affected by worker reuse, so it is **not isolated model memory**. Timing/memory are observational and need not bit-match across hosted-runner attempts; deterministic state and predictions do.
 
-## GDM60 reproducibility and provenance
+## GDM61 reproducibility, diagnostic history, and provenance
 
-GDM60’s canonical measured source is commit [`c04784ec33983829f6fe55506bcb74e0f40442b2`](https://github.com/burn2delete/graph-model/commit/c04784ec33983829f6fe55506bcb74e0f40442b2), source run [`35918183757`](https://github.com/burn2delete/graph-model/actions/runs/35918183757), attempts 1 and 2. Each attempt independently verified **20/20** declared results with no missing, failed, or unexpected configurations. Both preflights passed 67 current/inherited tests plus the deterministic `ranked-relative-confidence` hash smoke; that smoke is contract evidence, not pretrained-model performance.
+The original GDM61 source commit `913a683d3d294b2475699a7f5e9b31c565779d1c`, run `35935198866` attempt 1, failed **before smoke or measured workers** because one endpoint contract test incorrectly required GDM61's dedicated second-slot delta vector to be coordinate-identical to GDM60's diagnostic first-slot packing. 75/76 tests passed; this produced **no model evidence**. The failed preflight artifact is **10782563755**, ZIP SHA-256 `301fb291d9d8d86a77eebd36531909b2dd588a13c873741bc12b93a14cae1ac1`.
 
-- Attempt 1 `BATCH_REPORT` artifact **10777266084**, ZIP SHA-256 `9e4db92b71060fa9adac6a0edae8e1581b76bba81ffc6c67998f857c1372483f`.
-- Attempt 2 `BATCH_REPORT` artifact **10779222122**, ZIP SHA-256 `b63d54094c15e039d078f2fa84c26127eea48108a1fdd967ff616e5949ab1975`.
-- Passing exact-attempt audit run [`35929537000`](https://github.com/burn2delete/graph-model/actions/runs/35929537000), audit workflow commit [`765e156ec33231d38d96552dc81e8e0fb955a9ba`](https://github.com/burn2delete/graph-model/commit/765e156ec33231d38d96552dc81e8e0fb955a9ba).
-- Passing audit artifact **10781490854**, ZIP SHA-256 `ed4b27f37b6c85b27359aa40d681cc36705d3ae7c3ba7e24c187e70868155f70`.
+Test-only repair commit [`f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`](https://github.com/burn2delete/graph-model/commit/f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a) changed only the endpoint contract test. It preserved exact product-only coordinates and exact delta semantic content in GDM61's dedicated delta slot; model, data, curriculum, holdout, numerical path, and representation implementation were unchanged.
 
-The actual audit report is `gdm60-reproducibility-audit-v1` with `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, exact **operation 10/10 + schema 10/10**, and all 20 comparisons `exact_match=true`, `differing_fields=[]`, with `raw_feature_differences=[]`. The audit independently reconstructed both batch reports and verified attempt provenance, actual initial/selected full/capability/ambiguity checkpoint hashes, changed learned heads, optimizer/training/calibration records, matched 7,691-input top-five representation receipts, fixed curriculum/numerical/calibration contracts, deterministic regression/holdout/clause/family metrics, exact per-example predictions, and canonical fixed-probe/full-corpus hashes. The audit itself used bounded sequential/disk-backed comparison; its process-memory diagnostics are audit-runtime observations, not model-memory measurements.
+GDM61's canonical measured source is repaired commit `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, source run [`35939206923`](https://github.com/burn2delete/graph-model/actions/runs/35939206923), attempts 1 and 2. Each attempt independently verified **20/20** declared results with no missing, failed, or unexpected configurations.
+
+- Attempt 1 `BATCH_REPORT` artifact **10784817334**, ZIP SHA-256 `d5ee636c17233358b353bac0189a8f05151a403adcd5afc840cf222a7eba2b4e`.
+- Attempt 2 `BATCH_REPORT` artifact **10786971655**, ZIP SHA-256 `b96dd49e032a20b781b53495329b780c4509c417e5f182d694eae0f81e8ae965`.
+- Passing exact-attempt audit run [`35948010054`](https://github.com/burn2delete/graph-model/actions/runs/35948010054), audit workflow commit [`d9d785da08c5866c52db8ae74f9ad597a1a4ba47`](https://github.com/burn2delete/graph-model/commit/d9d785da08c5866c52db8ae74f9ad597a1a4ba47).
+- Passing audit artifact **10788215936**, ZIP SHA-256 `5b81ee234a0c4dfe889a33bf33d85e4b0640dc72a8f96d132063356861ba1d6f`.
+
+The actual audit report is `gdm61-reproducibility-audit-v1` with `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, exact **operation 10/10 + schema 10/10**, and all 20 comparisons `exact_match=true`, `differing_fields=[]`, with `raw_feature_differences=[]`. The audit independently rebuilt both batch reports and verified attempt-specific source/job/artifact/digest windows, repaired preflight/hash-smoke evidence, actual initial/selected full/capability/ambiguity checkpoint hashes, changed learned heads, optimizer/training/calibration records, matched 7,691-input TOP5 fixed-slot representation receipts, fixed family-balanced curriculum and numerical contract, GDM54 validation-only rescue, real GraphQL execution and Rover composition contracts, deterministic regression/holdout/clause/four-family metrics, exact per-example predictions, and canonical fixed-probe/full-corpus hashes.
 
 Artifact retention is finite. IDs and digests record provenance but do not substitute for retained source evidence if future re-verification is required.
 
+## Prior canonical result: GDM60
+
+GDM60 rejected simple capability-confidence attenuation and isolated product-only versus delta-only request-relative blocks. Its measured source is `c04784ec33983829f6fe55506bcb74e0f40442b2`, source run `35918183757` attempts 1/2, BATCH_REPORT artifacts **10777266084** (`9e4db92b71060fa9adac6a0edae8e1581b76bba81ffc6c67998f857c1372483f`) and **10779222122** (`b63d54094c15e039d078f2fa84c26127eea48108a1fdd967ff616e5949ab1975`), passing audit run `35929537000`, and audit artifact **10781490854** (`ed4b27f37b6c85b27359aa40d681cc36705d3ae7c3ba7e24c187e70868155f70`).
+
 ## Prior canonical result: GDM59
 
-GDM59 established that preserving top-five candidate rank is useful primarily through request-relative semantic interactions rather than raw candidate slots. On its fresh holdout, `ranked-request-only` materially improved answerable correctness and target recall versus the top-five pooled control and improved all three schema clause-count buckets, but paid a modest publication/precision cost.
-
-GDM59’s measured source is `035f44836d850b24f4bebe5cd499a572b6052752`, source run `35898256989` attempts 1/2, BATCH_REPORT artifacts **10769046397** (`b4a2237c074588a61031eb957ede60780b41bf5afc3b020d9c26768149ab5b20`) and **10770769769** (`c11e48f18b56d0e28f03720a9a7579957cbc97402642d591e1644789a656b312`), passing audit run `35910892558`, and audit artifact **10773722103** (`66dfea1e8bce33a06c77a80dbb287a29df2ddaba68d57aed289e51899f2b90a3`).
-
-## Prior canonical result: GDM58
-
-GDM58 changed only how many ranked candidates entered a fixed permutation-invariant pooled semantic representation. It found no operation answerable/precision/recall/publication benefit from wider pooled breadth and no schema answerable/ambiguity improvement over the top-two pooled control. The earlier GDM58 2-GiB archive-guard failure and repeated runner-shutdown audit attempts remain preserved as audit/runtime diagnostics, not source-model failures; the bounded-resource exact audit passed without weakening equality.
-
-GDM58’s measured source is `9ba9caab957c1802feb17776195141f630fd96eb`, source run `35819165142` attempts 1/2, BATCH_REPORT artifacts **10732952674** (`490d4ddcf88bbb517186c15d4dc7f85c643b3c75d480b27409d59f4c7a5c2a1a`) and **10735225675** (`36adadbd454fe064b20242e9ce1d8bdcbabfa4537520192b666331cf5ce6aaff`), passing audit run `35890238431`, and audit artifact **10765506374** (`b3f2f2273f8eca3cf6e12ba04b93144dcc51f59d327a47d91f96dc2bcb0c7163`).
+GDM59 established that preserving top-five candidate rank is useful primarily through request-relative semantic interactions rather than raw candidate slots. Its measured source is `035f44836d850b24f4bebe5cd499a572b6052752`, source run `35898256989` attempts 1/2, BATCH_REPORT artifacts **10769046397** (`b4a2237c074588a61031eb957ede60780b41bf5afc3b020d9c26768149ab5b20`) and **10770769769** (`c11e48f18b56d0e28f03720a9a7579957cbc97402642d591e1644789a656b312`), passing audit run `35910892558`, and audit artifact **10773722103** (`66dfea1e8bce33a06c77a80dbb287a29df2ddaba68d57aed289e51899f2b90a3`).
 
 ## Canonical provenance
 
@@ -223,7 +238,8 @@ GDM58’s measured source is `9ba9caab957c1802feb17776195141f630fd96eb`, source 
 | GDM57 | source `3f8b9a968285110ca6c744590724ddd0cb2bd5aa`, run `35803609103` | `35811475866` |
 | GDM58 | source `9ba9caab957c1802feb17776195141f630fd96eb`, run `35819165142` | `35890238431` |
 | GDM59 | source `035f44836d850b24f4bebe5cd499a572b6052752`, run `35898256989` | `35910892558` |
-| **GDM60** | source `c04784ec33983829f6fe55506bcb74e0f40442b2`, run `35918183757` | **`35929537000`** |
+| GDM60 | source `c04784ec33983829f6fe55506bcb74e0f40442b2`, run `35918183757` | `35929537000` |
+| **GDM61** | source `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, run `35939206923` | **`35948010054`** |
 
 ## Evidence and promotion policy
 
@@ -237,9 +253,9 @@ Fresh holdouts never select optimizer behavior, checkpoints, thresholds, curricu
 
 The measured system remains a small synthetic catalog-projection research environment. It has not established unrestricted schema invention, general mutation/subscription generation, arbitrary enterprise topology handling, transformer fine-tuning benefits, or production-scale latency/memory behavior.
 
-GDM60 rejects the simplest safety idea after GDM59: **multiplying rank-preserving request-relative semantics by capability confidence does not recover safety without erasing answerable capability**. The useful signal is more structured. Operations benefit substantially from the product interaction block, whereas schemas get their best factorized tradeoff from the absolute-difference block. The schema effect is small, and residual semantic confusions remain, so this is evidence about representation components rather than a final task-specific architecture.
+GDM61 rejects the proposed fixed-scale interpolation as a reliable next architecture. The result is also a warning against overreading GDM60's product-only operation endpoint across unlike holdouts. The remaining ambiguity errors are relational: the model confuses **one plausible candidate with another plausible candidate** (author versus moderator, name versus ID) even when request-relative features are available.
 
-The next unverified hypothesis is a bounded **interaction-block balance** experiment: preserve top-five rank, head capacity, curriculum, encoder, numerical path, calibration, and GraphQL realization, then vary only fixed relative scaling between the product and absolute-difference blocks. A suitable matched-capacity set should include product-only, product-dominant, balanced GDM59 control, delta-dominant, and delta-only arms on fresh calibration/secondary-holdout domains. This directly tests whether the task-specific GDM60 endpoints are robust or whether an intermediate fixed balance gives a better answerable/safety frontier. It is a hypothesis, not yet a result.
+The next unverified hypothesis is therefore **explicit top-ranked candidate-to-candidate semantic contrast**. Preserve TOP5 rank, head capacity, curriculum, encoder, numerical path, calibration, and GraphQL realization, but replace one request-relative block with nonlinear top-1-to-candidate relations such as `abs(c1-ci)` or `c1*ci`, paired with either `q*ci` or `abs(q-ci)`. This adds genuinely candidate-relational information instead of another scalar rescaling of already-present features. It remains an unverified hypothesis until measured and audited.
 
 ## Repository map
 
@@ -255,7 +271,8 @@ The next unverified hypothesis is a bounded **interaction-block balance** experi
 | [`experiments/followup57/`](experiments/followup57/) | Top-two semantic ambiguity representation |
 | [`experiments/followup58/`](experiments/followup58/) | Pooled top-k ambiguity evidence |
 | [`experiments/followup59/`](experiments/followup59/) | Rank-preserving top-five ambiguity representation |
-| [`experiments/followup60/`](experiments/followup60/) | Request-relative factorization and confidence scaling, latest canonical experiment |
+| [`experiments/followup60/`](experiments/followup60/) | Request-relative factorization and confidence scaling |
+| [`experiments/followup61/`](experiments/followup61/) | Fixed product/delta balance, latest canonical experiment |
 | [`.github/workflows/`](.github/workflows/) | Actions-only measured batches and exact-attempt audits |
 
-Use each experiment’s declared workflow/execution wrapper when reproducing it. Calling historical Python entrypoints directly can bypass the canonical numerical contract.
+Use each experiment's declared workflow/execution wrapper when reproducing it. Calling historical Python entrypoints directly can bypass the canonical numerical contract.
