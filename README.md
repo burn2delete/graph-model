@@ -12,21 +12,21 @@ The system must also know when not to publish an operation: unsupported requests
 
 **Schema-generation research is suspended/frozen. Query planning is out of scope.** Historical schema evidence through GDM61 is retained as provenance/regression history only; it does not drive new architecture choices, measured arms, promotion decisions, or forward benchmarks.
 
-The current measured system is deliberately narrower than unrestricted token-level GraphQL synthesis. A **frozen semantic encoder plus learned capability and ambiguity heads** maps request clauses onto schema-grounded capabilities. Deterministic code realizes accepted capabilities as real GraphQL, which is parsed, validated, and executed. The transformer backbone is not fine-tuned.
+The measured system is deliberately narrower than unrestricted token-level GraphQL synthesis. A **frozen semantic encoder plus learned capability and ambiguity heads** maps request clauses onto schema-grounded capabilities. Deterministic code realizes accepted capabilities as real GraphQL, which is parsed, validated, and executed. The transformer backbone is not fine-tuned.
 
 Read [`experiments/MEASUREMENT_POLICY.md`](experiments/MEASUREMENT_POLICY.md) and [`experiments/measured/REPAIR.md`](experiments/measured/REPAIR.md) before interpreting results or changing experiments.
 
 ## Current research state
 
-_Last synchronized: 2026-09-24. Latest canonical experiment: GDM63. Forward scope: operation generation only._
+_Last synchronized: 2026-09-24. Latest canonical experiment: GDM64. Forward scope: operation generation only._
 
 | State | Meaning |
 | --- | --- |
-| **Canonical through GDM63** | GDM50–GDM61 retain historical measured evidence/audits; GDM62 and GDM63 are post-suspension operation-only promotions. Canonical means reproducible usable evidence under the declared contract, not automatic architecture victory. |
+| **Canonical through GDM64** | GDM50–GDM61 retain historical measured evidence/audits; GDM62–GDM64 are post-suspension operation-only promotions. Canonical means reproducible usable evidence under the declared contract, not automatic architecture victory. |
 | **Forward task** | Generate an executable GraphQL operation from an intent and provided schema/catalog, while correctly handling answerable, NO_MATCH, and AMBIGUOUS requests. |
 | **Schema generation** | **Suspended/frozen.** GDM41–61 schema evidence remains historical provenance only. No new schema arms are launched, scored, optimized, or promoted. |
-| **Latest supported operation result** | **GDM63 is negative/inconclusive for a small matched-capacity learned rank-preserving cross-candidate gate.** All five learned relation modes have identical answerable accuracy, precision, recall, clause exactness, ambiguity-family counts, and the same dominant semantic confusions; only a few NO_MATCH decisions move. The retained architecture therefore remains the canonical ranked request-relative `q*ci + abs(q-ci)` representation without the GDM63 adapter. |
-| **Next unverified hypothesis** | The persistent failures may come from **semantic factorization inside each schema coordinate**, not from candidate-set comparison. A bounded next experiment should test whether separately representing path/role semantics (for example parent-role vs leaf/representation semantics) gives the ambiguity head information that whole-candidate embeddings and scalar cross-candidate gates fail to expose. This is unverified and must be prespecified with matched capacity before launch. |
+| **Latest supported operation result** | **GDM64 is negative/inconclusive for deterministic schema-coordinate parent/leaf factorization.** Parent-only, leaf-only, and split parent/leaf views do not improve the broad operation frontier over the exact whole-request control; split-product materially degrades answerable/recall/role behavior. The retained architecture remains ranked request-relative `q*ci + abs(q-ci)` over whole candidate embeddings. |
+| **Next unverified hypothesis** | The persistent errors may require an **explicit structured schema-relation channel**, not another semantic embedding recombination. A bounded next experiment should test topology/type relations derived only from the provided schema/catalog—such as same-parent/sibling relation, same-leaf relation, path-prefix/LCP structure, and field/type-signature relation—alongside the canonical whole-candidate semantic slots under matched capacity. This must not use hidden answer labels or fresh-holdout information. |
 | **Invalid historical evidence** | Original GDM41–44 jobs wrote manifests and fabricated/simulated metrics. Their promotions are withdrawn. Only measured repair run `35565425124` (196/196 verified) is the valid GDM41–44 baseline. |
 
 ## Retained operation-generation architecture
@@ -50,6 +50,7 @@ Natural-language intent/request + provided GraphQL schema/catalog
                               |
                   learned clause-local ambiguity head
        scalar/structural + rank-preserving request-relative semantics
+                      q*ci + abs(q-ci), TOP5
                               |
              validation-calibrated thresholds/arbitration
                               |
@@ -66,7 +67,7 @@ Natural-language intent/request + provided GraphQL schema/catalog
                                       per-example evidence + metrics
 ```
 
-**GDM63 does not change the retained architecture.** It added an equal-capacity learned interaction adapter to every experimental arm, including a rank-local matched-capacity control. The cross-candidate relation mode changed, but the raw top-five request-relative representation stayed fixed. The cross-candidate modes did not improve the broad operation frontier or the difficult ambiguity families, so the adapter is an experimental negative rather than a retained architecture change.
+**GDM64 does not change the retained architecture.** It replaced the canonical whole-candidate ambiguity slots in experimental arms with deterministic parent-path and/or leaf-field semantic views derived from the provided GraphQL candidate path while holding TOP5 rank identity, dimensionality, downstream ambiguity MLP capacity, capability ranking, curriculum, numerical execution, calibration, and GraphQL realization fixed. Those factored views did not improve the broad frontier or eliminate the dominant role/name-vs-ID confusions, so they remain experimental negatives rather than retained architecture changes.
 
 ### Inputs and bounded capabilities
 
@@ -96,7 +97,8 @@ The ambiguity line has established:
 - GDM60: simple confidence attenuation is negative.
 - GDM61: fixed product/delta rescaling is negative/inconclusive.
 - GDM62: fixed candidate-to-candidate relations do not improve the broad operation frontier.
-- **GDM63: a small learned rank-preserving scalar gate over cross-candidate relations also does not improve the broad frontier or ambiguity-family behavior over a matched-capacity rank-local control.**
+- GDM63: a small learned rank-preserving scalar gate over cross-candidate relations does not improve the broad frontier over a matched-capacity local control.
+- **GDM64: deterministic parent-path/leaf-field semantic factorization does not improve the broad frontier over the exact whole-candidate request-relative control; split-product sharply worsens role behavior.**
 
 ### Validation-only arbitration and deterministic realization
 
@@ -130,87 +132,95 @@ Fresh holdouts never enter optimizer, checkpoint, representation, curriculum, or
 | GDM60 | Simple confidence weighting loses answerable recall. | Confidence attenuation is negative. |
 | GDM61 | Fixed product/delta scaling does not improve the within-batch answerable/safety frontier. | Scalar rescaling is negative/inconclusive. |
 | GDM62 | Fixed rank-1 candidate delta/product blocks do not beat request-relative control and can worsen role discrimination. | Retain request-relative ranked semantics. |
-| **GDM63** | **Matched-capacity learned local/top1/neighbor/all-pairs/competitive gates all produce the same answerable accuracy, precision, recall, clause exactness, and pooled ambiguity-family counts. Cross-candidate modes move only a few NO_MATCH calls.** | **Do not retain the learned gate. Candidate-set interaction, at least when reduced to a per-rank scalar modulation of existing slots, is not the missing semantic signal. Test a different information factorization rather than a larger version of the same gate.** |
+| GDM63 | Matched-capacity learned local/top1/neighbor/all-pairs/competitive gates do not improve answerable accuracy, precision/recall, clause exactness, or pooled ambiguity-family behavior. | Do not retain the learned gate. Scalar candidate-set interaction is not the missing semantic signal. |
+| **GDM64** | **Parent-only, leaf-only, and split parent/leaf semantic views fail to improve the exact whole-candidate control. Split-delta is effectively tied; split-product drops answerable accuracy/recall and collapses pooled role correctness to 1/8.** | **Do not retain path-factorized embedding replacement. Keep whole-candidate request-relative semantics and test explicit structured schema relations instead of another embedding recombination.** |
 
 Historical schema findings through GDM61 remain available in prior commits/artifacts but are frozen and are not forward research targets.
 
-# Latest canonical operation evidence: GDM63
+# Latest canonical operation evidence: GDM64
 
 ## Architecture delta and experiment contract
 
-GDM63 keeps capability training, explicit NONE, frozen DistilBERT, the `1e-4` feature boundary, exact GDM56 family-balanced ambiguity curriculum with zero counterfactuals, GDM50 numerical execution, GDM54 validation-only rescue, top-five rank identity, and deterministic real GraphQL realization fixed.
+GDM64 tests whether whole-candidate embeddings collapse distinctions such as parent role (`author` vs `moderator`) and leaf representation (`name` vs `id`) before the ambiguity head sees them. It keeps capability training, explicit NONE, frozen DistilBERT, the `1e-4` boundary, GDM56 family-balanced ambiguity curriculum with zero counterfactuals, GDM50 numerical execution, GDM54 validation-only rescue, TOP5 rank identity, the same `dim -> 32 -> 1` ambiguity MLP capacity, and deterministic real GraphQL realization fixed.
 
-Every arm receives the exact canonical raw ambiguity vector: **11 scalar/structural features + five `q*ci` slots + five `abs(q-ci)` slots = `11 + 10*d = 7,691` DistilBERT dimensions**. Every arm also gets the same bounded learned adapter and the same downstream `dim -> 32 -> 1` ambiguity MLP. The adapter uses a shared `Linear(2d -> 4)` projection, five learned rank strengths, temperature, residual scale, and interaction bias. Parameter shapes/counts and optimizer treatment are identical across arms. Only the deterministic relation used to derive a learned per-rank scalar gate differs:
+Every arm remains exactly **11 scalar/structural features + ten rank-preserving semantic slots = `11 + 10*d = 7,691` DistilBERT dimensions**. No GDM64 arm adds a learned adapter. Only the deterministic semantic source of the ten slots differs:
 
-- `learned-local-control`: self-energy only, no cross-rank relation;
-- `learned-top1-cross`: rank `i` against rank 1;
-- `learned-neighbor-cross`: rank `i` against the preceding rank;
-- `learned-allpairs-cross`: mean relation to all other active ranks;
-- `learned-competitive-cross`: strongest-other minus mean-other relation.
+- `whole-request-control`: `(q*ci, abs(q-ci))`, the exact retained canonical representation;
+- `parent-request-factor`: `(q*pi, abs(q-pi))`, where `pi` encodes `GraphQL parent path: <path excluding root and leaf>`;
+- `leaf-request-factor`: `(q*li, abs(q-li))`, where `li` encodes `GraphQL leaf field: <leaf>`;
+- `split-parent-leaf-product`: `(q*pi, q*li)`;
+- `split-parent-leaf-delta`: `(abs(q-pi), abs(q-li))`.
 
-The primary causal comparator is therefore the **matched-capacity local control**, not historical GDM62 on a different fresh holdout.
-
-`Ledger` / `Index` are calibration-only. `Docket` / `Portfolio` are the fresh GDM63 secondary holdout and, after this canonical inspection, are now **regression-only**.
+Parent/leaf strings are derived **only from the provided GraphQL candidate path**. They are cached catalog evidence and never alter capability ranking. `Registry` / `Logbook` are calibration-only. `Folio` / `Casebook` are the fresh GDM64 secondary holdout and, after this canonical inspection, are now **regression-only**.
 
 ## Verified operation metrics
 
-The holdout has 84 cases per seed: **36 answerable + 48 risk**, where risk comprises **32 NO_MATCH + 16 AMBIGUOUS**. Means below are over seeds `6301,6302`. Status counts pool both seeds: AMBIGUOUS denominator **32**, NO_MATCH denominator **64**. Clause denominators pool both seeds: **32 one-clause, 24 two-clause, 16 three-clause** evaluations.
+The GDM64 holdout has 84 cases per seed: **36 answerable + 48 risk**, where risk comprises **32 NO_MATCH + 16 AMBIGUOUS**. Means below are over seeds `6401,6402`. Status counts pool both seeds: AMBIGUOUS denominator **32**, NO_MATCH denominator **64**. Clause denominators pool both seeds: **32 one-clause, 24 two-clause, 16 three-clause** evaluations.
 
-| Arm | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Learned local control** | **26.39%** | 63.54% | **12.50%** | **91.67%** | **22.66%** | **22/32** | 39/64 |
-| Learned top1 cross | **26.39%** | 63.54% | **12.50%** | **91.67%** | **22.66%** | **22/32** | 39/64 |
-| Learned neighbor cross | **26.39%** | 61.46% | **12.50%** | **91.67%** | **22.66%** | **22/32** | 37/64 |
-| Learned all-pairs cross | **26.39%** | 63.54% | **12.50%** | **91.67%** | **22.66%** | **22/32** | 39/64 |
-| Learned competitive cross | **26.39%** | **64.58%** | **12.50%** | **91.67%** | **22.66%** | **22/32** | **40/64** |
+| Arm | Answerable accuracy | Risk accuracy | Incorrect publication | Target precision | Target recall | AMBIGUOUS | NO_MATCH | 1/2/3-clause exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **Whole-request control** | **54.17%** | **58.33%** | 28.57% | **89.46%** | **57.03%** | **27/32** | 29/64 | **20/32 · 12/24 · 7/16** |
+| Parent request factor | **54.17%** | 56.25% | 29.17% | **89.46%** | **57.03%** | 25/32 | 29/64 | **20/32 · 12/24 · 7/16** |
+| Leaf request factor | **54.17%** | 55.21% | 29.17% | **89.46%** | **57.03%** | 25/32 | 28/64 | **20/32 · 12/24 · 7/16** |
+| Split parent/leaf delta | **54.17%** | **58.33%** | **27.98%** | **89.46%** | **57.03%** | **27/32** | 29/64 | **20/32 · 12/24 · 7/16** |
+| Split parent/leaf product | 44.44% | 55.21% | 28.57% | 87.10% | 44.53% | 17/32 | **36/64** | 18/32 · 9/24 · 5/16 |
 
-All five arms have exact one-/two-/three-clause correctness **12/32, 6/24, 1/16**. Thus cross-candidate learning provides **no answerable, target-level, ambiguity, or multi-clause gain** over the matched-capacity local control. Competitive-cross recovers one additional NO_MATCH case; neighbor-cross loses two. That narrow status movement is insufficient to establish a useful cross-candidate architecture improvement.
+The split-delta arm is effectively tied with the exact whole-request control on answerable, risk, target precision/recall, AMBIGUOUS, NO_MATCH, and clause exactness; its 0.59-point lower incorrect-publication mean does not establish a robust architecture win, especially given the seed variance below. Parent-only and leaf-only preserve answerable/target metrics but reduce ambiguity/risk handling. Split-product shifts toward NO_MATCH while materially losing answerable correctness, recall, AMBIGUOUS recovery, and multi-clause exactness.
 
-The same dominant semantic confusions occur in every arm: `docket.reviews.author.name -> docket.reviews.author.id` (**3**) and `docket.reviews.moderator.name -> docket.reviews.author.id` (**2**). This is direct evidence that the tested interaction modes do not repair the persistent role and name-vs-ID distinctions.
+The supported conclusion is therefore **negative/inconclusive for replacing whole-candidate request-relative semantic slots with deterministic parent/leaf embedding factorization**. The retained representation remains `q*ci + abs(q-ci)`.
 
 ## Fresh ambiguity-family analysis
 
-Each family has 8 pooled cases across the two seeds. **Every GDM63 arm has exactly the same pooled family result**:
+Each family has 8 pooled cases across the two seeds.
 
-| Family | Correct |
-| --- | ---: |
-| Role | **5/8** |
-| Lifecycle-time | **4/8** |
-| Representation / name-vs-ID | **5/8** |
-| Object-vs-supplier | **8/8** |
+| Arm | Role | Lifecycle-time | Representation / name-vs-ID | Object-vs-supplier |
+| --- | ---: | ---: | ---: | ---: |
+| **Whole-request control** | **7/8** | **6/8** | **7/8** | **7/8** |
+| Parent request factor | **7/8** | **6/8** | **7/8** | 5/8 |
+| Leaf request factor | **7/8** | **6/8** | **7/8** | 5/8 |
+| Split parent/leaf delta | **7/8** | **6/8** | **7/8** | **7/8** |
+| Split parent/leaf product | **1/8** | 4/8 | **7/8** | 5/8 |
 
-Object-vs-supplier remains solved in this synthetic slice, lifecycle-time remains at chance-like 4/8, and the two most relevant unresolved families—role and representation—remain 5/8 regardless of interaction mode. Candidate-to-candidate gating therefore does not expose the missing semantic distinction.
+Neither parent-only nor leaf-only improves the targeted role or representation families over the whole control. Split-delta again exactly ties those families. Split-product is strongly harmful to role discrimination, reaching only **1/8** pooled role correctness. This is especially important because the purpose of the factorization was to expose role/representation distinctions more clearly.
+
+Dominant semantic confusions persist in the verified aggregate evidence. Whole-control, parent-only, leaf-only, and split-delta each include `folio.reviews.author.name -> folio.reviews.author.id` (**4**), `casebook.reviews.author.name -> casebook.reviews.author.id` (**4**), `folio.reviews.moderator.name -> folio.reviews.author.id` (**2**), `casebook.reviews.moderator.name -> casebook.reviews.author.id` (**2**), and a smaller `folio.updatedAt -> folio.createdAt` confusion (**1**). Split-product changes some counts but does not repair the underlying role/name-vs-ID failure and performs worse overall.
 
 ## Seed stability, regression, latency, and memory
 
-GDM63 exposes substantial seed sensitivity that is shared by every arm. Seed 6301 vs 6302 answerable accuracy is **19.44% vs 33.33%** (13.89 points), incorrect publication **4.76% vs 20.24%** (15.48 points), target precision **100% vs 83.33%**, and recall **14.06% vs 31.25%**. Risk seed gaps vary by relation mode from 2.08 to 8.33 points. The cross-candidate arms therefore do not provide a stability advantage.
+GDM64 remains highly seed-sensitive. For the exact whole-request control, seed `6401` vs `6402` is **41.67% vs 66.67% answerable accuracy** (25 points), **62.50% vs 54.17% risk accuracy**, **16.67% vs 40.48% incorrect publication**, **96.15% vs 82.76% target precision**, and **39.06% vs 75.00% target recall**. Split-delta shows the same 25-point answerable gap and 35.94-point recall gap, with incorrect publication **16.67% vs 39.29%**. Parent and leaf factor arms show similarly large seed movement. Split-product is more stable on answerable accuracy (**41.67% vs 47.22%**) but at substantially worse mean quality, so that is not a useful stability gain.
 
-Mean operation regression accuracy is approximately **49.36%–49.85%** across arms. These inspected regressions plus `Docket` / `Portfolio` are now regression-only. Fresh holdouts from different numbered batches are not a causal leaderboard.
+Mean operation regression accuracy is approximately **48.30%–49.82%** across arms. These inspected regressions plus `Folio` / `Casebook` are now regression-only. Fresh holdouts from different numbered batches are not a causal leaderboard.
 
-Hosted-runner generation measurements are observational. Source attempt 1 means span approximately **44.75–48.65 ms p50**, **87.42–93.00 ms p95**, and **1,226,844–1,229,306 KiB RSS-after-evaluation**. Source attempt 2 aggregate p50 spans approximately **67.45–68.23 ms**, p95 **135.06–136.56 ms**, and RSS approximately **1,226,026–1,228,368 KiB**. The runner-to-runner timing shift reinforces why p50/p95/RSS are observational rather than exact reproducibility fields. RSS is whole-process memory, not isolated model memory.
+Hosted-runner generation measurements are observational. Source attempt 1 aggregate means span approximately **77.27–79.59 ms p50**, **152.27–155.69 ms p95**, and **1,264,818–1,268,900 KiB RSS-after-evaluation**. Source attempt 2 spans approximately **73.75–74.65 ms p50**, **145.99–147.68 ms p95**, and **1,260,666–1,267,414 KiB RSS**. RSS is whole-process memory, not isolated model memory, and runner-to-runner timing movement is not a deterministic model field.
 
-## GDM63 failures, reproducibility, and provenance
+## GDM64 reproducibility, audit diagnostics, and provenance
 
-The original measured source [`dd3ed0df6cc835b90d7a003c661d7caafe7dff0e`](https://github.com/burn2delete/graph-model/commit/dd3ed0df6cc835b90d7a003c661d7caafe7dff0e) failed preflight in run `35971746710` after all 94 tests and the hash smoke because `training.gdm63_change_scope` used a shorter metadata receipt than the independent collector expected. The operation worker and batch verification were skipped; this run contains **no full measured GDM63 model evidence**. Failed preflight artifact **10796397961**, SHA-256 `78d33e0dd629f41825cf784975233354687330acb78c8beb3bc00d28429b099b`, is preserved as diagnostic history.
+Measured source commit: [`6fe0f89630324fa18c18175c1d7c64ba614a1cff`](https://github.com/burn2delete/graph-model/commit/6fe0f89630324fa18c18175c1d7c64ba614a1cff). Source workflow run: [`35995968508`](https://github.com/burn2delete/graph-model/actions/runs/35995968508), two independently verified 10/10 attempts on the same source and seeds `6401,6402`.
 
-The in-place repair [`43a6d16652a3fd63c155f46e99b42c757c7601a1`](https://github.com/burn2delete/graph-model/commit/43a6d16652a3fd63c155f46e99b42c757c7601a1) changed only that metadata receipt string. It did **not** change architecture, parameters, data, curriculum, seeds, holdout, optimizer, representation, calibration, GraphQL realization, or the `1e-4` boundary.
+Source attempt evidence:
 
-The repaired source run [`35976527471`](https://github.com/burn2delete/graph-model/actions/runs/35976527471) produced two independently verified 10/10 attempts on the same source/seeds:
+- Attempt 1 preflight artifact **10806327006**, SHA-256 `3a4a8fd3e45fdf6d2b144ee34c37c5bfb1b5262c3857442c0587227676605044`; operation artifact **10806744697**, SHA-256 `b82bdcecd8287e40f3464b5abed355baae131e93b5fc13d875f62ebdf445d2ac`; source operation `BATCH_REPORT` artifact **10806439103**, SHA-256 `7265c0c821c2b5d483efdcf1dc15ba7bdfd4d7eccd22dfdfaa1ff31a69667a05`.
+- Attempt 2 preflight artifact **10808385906**, SHA-256 `eaa0b7a3e3ddf8eae40d2ecfa02d395f4ab4d7c9ed9853b459210827f7378e6e`; operation artifact **10809460402**, SHA-256 `cf81d28921824ce9b15aad4ee3c89d00bb3d38fb1297a2c86343b0a099ef50da`; source operation `BATCH_REPORT` artifact **10809186317**, SHA-256 `701f7edef0c7f521c4b60781e6ce4866fc58b1d109ca90d8fabab34b2b913d2c`.
 
-- Attempt 1 source operation artifact **10799480293**, SHA-256 `07e991bbfffdeeaefd45a65e66782fbf19b5ce24889ab9d5f717d4cd7f515050`; source operation `BATCH_REPORT` artifact **10798847385**, SHA-256 `d29a5913e7190997f7f41a3ac2c87c510b1d840cfe4f44c09ca2cab82337c98f`.
-- Attempt 2 source operation artifact **10801593060**, SHA-256 `b12ad13130292033f9389ac67db819c6f0a74d228584390ad04a93e56e24e919`; source operation `BATCH_REPORT` artifact **10801696846**, SHA-256 `f2b44d7e91a071838b66daf9316d9130cb93dbe29dca1e42da4d44a0050dc464`.
+There were three **audit-orchestration failures that are not model evidence** and are preserved as diagnostics:
 
-The dedicated exact-attempt audit is run [`35988393672`](https://github.com/burn2delete/graph-model/actions/runs/35988393672) at audit-only commit [`53ac6ec72857d195b2f74f0975944525e388df55`](https://github.com/burn2delete/graph-model/commit/53ac6ec72857d195b2f74f0975944525e388df55). It independently rebuilt both operation reports and verified actual full/capability/ambiguity/interaction checkpoint hashes, changed learned interaction state including `ambiguity.proj.weight`, matched parameter counts, TOP5/7,691 representation receipts, numerical/curriculum/calibration contracts, canonical feature hashes, exact regression/holdout/clause/family metrics, and exact per-example predictions. It compared all **10/10 operation configs exactly** with `schema_configs_compared=0`; only aggregate observational p50/p95/RSS may differ across source attempts.
+1. audit workflow commit `36d6575170252fea817e71c6f725bfc942fce330` produced invalid-YAML run `36007019132` with no jobs;
+2. audit-driver addition `1a29ce5b5008e1b8c864872f68ad0eb0aedd8b46` also produced invalid-YAML run `36007277958`;
+3. syntax repair `07f71818ace16b253b8d5af54b89adec83174f65` produced valid run `36007347666` / job `107658827524`, but the audit failed before evidence comparison because its template transformer assumed the wrong indentation for `adapter_counts`. Diagnostic artifact **10810464477**, SHA-256 `8ab329fc1716c05c2f68db2050a2edff4f9d995d561d7a19bce41b81b57554dc`.
+
+None of those repairs changed source model architecture, data, training, optimizer, representation, calibration, seeds, holdout, or GraphQL semantics.
+
+The audit driver was repaired audit-only at commit [`39b97e44a822c1a6d31812af88fb8ae62b2885c7`](https://github.com/burn2delete/graph-model/commit/39b97e44a822c1a6d31812af88fb8ae62b2885c7), then triggered at [`d64a8f2fb4ae5aa6d59e0f2b7898a9d3d6dfbfb8`](https://github.com/burn2delete/graph-model/commit/d64a8f2fb4ae5aa6d59e0f2b7898a9d3d6dfbfb8). Passing exact-attempt audit run: [`36007882683`](https://github.com/burn2delete/graph-model/actions/runs/36007882683), job `107660653253`.
 
 Passing audit evidence:
 
-- Independently rebuilt attempt-1 operation `BATCH_REPORT`: artifact **10803551517**, SHA-256 `732210dbecfa54d0afb738dde1cc9b2d9d50a4a691fe8a2f16bf1df8da61d25a`.
-- Independently rebuilt attempt-2 operation `BATCH_REPORT`: artifact **10803077837**, SHA-256 `73e3423984c26904c066bc4ef15d6f221c95409289a612fd757df201882bcab8`.
-- Passing audit artifact **10803611438**, SHA-256 `f3c0e7e86665cfac54f14b3c81bb04de16fc9e6d3ad76a830935f1836234a6a7`.
+- Independently rebuilt attempt-1 operation `BATCH_REPORT`: artifact **10811083586**, SHA-256 `b16dd44a91953f8ff5038595fd31718dd6205b3c2d18d20da696a1415978cde8`.
+- Independently rebuilt attempt-2 operation `BATCH_REPORT`: artifact **10811408339**, SHA-256 `1d51113fd3905852c966193b29d03044ce4eafdb2638bf9dba88d0e3daa3b4b5`.
+- Passing audit artifact **10811273396**, SHA-256 `7f4586e5d5463680e5671f0217c3d1c0cc4a6e6212937f98ce2023e69b024786`.
 
-The `gdm63-operation-reproducibility-audit-v1` gate has `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, `expected_operation_configs=10`, `matched_operation_configs=10`, `schema_configs_compared=0`, all ten comparisons `exact_match=true`, and `differing_fields=[]`.
+The audit passed **10/10 operation configs exactly with schema evidence excluded**. Its gate is `complete=true`, `evidence_verified=true`, `reproducible=true`, `promotion_eligible=true`, `errors=[]`, `expected_operation_configs=10`, `matched_operation_configs=10`, `schema_configs_compared=0`, with all ten comparisons exact and deterministic fields equal. Aggregate p50/p95/RSS remain observational fields.
 
-An Actions-only promotion analysis run [`35994447306`](https://github.com/burn2delete/graph-model/actions/runs/35994447306) at commit [`38b1b59268db6358937b1586aed7fe1c954624ee`](https://github.com/burn2delete/graph-model/commit/38b1b59268db6358937b1586aed7fe1c954624ee) independently checked the passing audit gate and aggregated seed/family/runtime evidence without retraining. Analysis artifact **10805078417**, SHA-256 `8ff5882d9e996106504354d275303445aa65b6a3d2a8a6c23491bd93d432d11c`. `Docket` / `Portfolio` becomes regression-only with this inspection.
+An Actions-only promotion analysis run [`36013873159`](https://github.com/burn2delete/graph-model/actions/runs/36013873159) at commit [`906a1ff83468b8656bf63ec1f4ee1f4c0f7f09ff`](https://github.com/burn2delete/graph-model/commit/906a1ff83468b8656bf63ec1f4ee1f4c0f7f09ff) independently checked the passing audit/source receipts and aggregated operation-only arm, family, seed, regression, latency, and memory evidence without retraining. Analysis artifact **10814036333**, SHA-256 `a85a05a2cb7367b6eca049e7a52232d205f8b67522a72a50587880e3cd428f2f`.
 
 ## Canonical provenance
 
@@ -230,7 +240,8 @@ An Actions-only promotion analysis run [`35994447306`](https://github.com/burn2d
 | GDM60 | source `c04784ec33983829f6fe55506bcb74e0f40442b2`, run `35918183757` | `35929537000` |
 | GDM61 | source `f22fc36caf7327ed3d0d1f7dd2898ea31d837f3a`, run `35939206923` | `35948010054` |
 | GDM62 operation-only | source `a3cfa70a570f931e2c78553ca9d72aeb5ed65e79`, run `35953082798` | `35965921793` |
-| **GDM63 operation-only** | source **`43a6d16652a3fd63c155f46e99b42c757c7601a1`**, run **`35976527471`**, attempts 1/2 | **`35988393672`** |
+| GDM63 operation-only | source `43a6d16652a3fd63c155f46e99b42c757c7601a1`, run `35976527471`, attempts 1/2 | `35988393672` |
+| **GDM64 operation-only** | source **`6fe0f89630324fa18c18175c1d7c64ba614a1cff`**, run **`35995968508`**, attempts 1/2 | **`36007882683`** |
 
 ## Evidence and promotion policy
 
@@ -244,9 +255,9 @@ Historical schema metrics/artifacts are retained for provenance but are frozen a
 
 The measured system remains a small synthetic, schema-grounded research environment. It has not established unrestricted operation token generation, general mutation/subscription generation, arbitrary enterprise topology handling, learned clause decomposition, transformer fine-tuning benefits, or production-scale latency/memory behavior.
 
-GDM63 rules out another narrow architecture family: **a small learned cross-candidate relation that only produces a scalar per-rank gate over the existing request-relative semantic slots does not improve the matched-capacity local control.** The experiment is especially informative because the learned interaction parameters provably changed, yet every arm retained the same answerable accuracy, precision/recall, clause exactness, pooled family outcomes, and dominant semantic confusions.
+GDM62–GDM64 now rule out three increasingly direct variants of the same broad idea under the tested contracts: **fixed candidate-to-candidate algebraic relations, learned scalar cross-candidate gates, and deterministic parent/leaf semantic embedding factorization**. None repaired the persistent author-name/ID and moderator/author confusions while improving the broad answerable/safety frontier. GDM64 is particularly informative because it explicitly exposed the intended parent and leaf text views, yet parent/leaf replacement did not improve role or representation family correctness over the whole-candidate control, and the product split strongly harmed role discrimination.
 
-The next unverified hypothesis shifts the information boundary rather than making the gate larger: **the ambiguity head may need schema-coordinate semantic factorization—separate evidence for parent/role path semantics and leaf/representation semantics—because a single whole-candidate embedding can collapse distinctions such as author vs moderator and name vs ID before candidate-set interaction is applied.** This remains a hypothesis, not a selected GDM64 design. Any GDM64 prespecification must remain operation-only, keep the frozen encoder/numerical/calibration/GraphQL contracts fixed, use matched bounded capacity, and establish that any new path-factorized features come only from the provided schema/catalog and never from the fresh holdout.
+The next unverified hypothesis should therefore change the information type rather than make semantic embedding recombination more elaborate: **the ambiguity head may need an explicit structured schema-relation channel describing relations among ranked schema coordinates**. Candidate features can be derived deterministically from the provided schema/catalog—for example same-parent/sibling status, same leaf, path-prefix/longest-common-prefix structure, object-vs-scalar/type-signature relation, or a bounded categorical relation code—while retaining the canonical whole-candidate request-relative semantic slots. Any next experiment must prespecify matched bounded capacity, avoid hidden labels or holdout-derived features, retain capability ranking and the frozen numerical/calibration/GraphQL contracts, and use a fresh operation-only holdout.
 
 ## Repository map
 
@@ -264,7 +275,8 @@ The next unverified hypothesis shifts the information boundary rather than makin
 | [`experiments/followup60/`](experiments/followup60/) | Request-relative factorization/confidence scaling |
 | [`experiments/followup61/`](experiments/followup61/) | Fixed product/delta balance; historical canonical evidence |
 | [`experiments/followup62/`](experiments/followup62/) | Fixed candidate-relational operation evidence |
-| [`experiments/followup63/`](experiments/followup63/) | Matched-capacity learned candidate-interaction operation evidence; latest canonical experiment |
+| [`experiments/followup63/`](experiments/followup63/) | Matched-capacity learned candidate-interaction operation evidence |
+| [`experiments/followup64/`](experiments/followup64/) | Schema-coordinate parent/leaf factorization operation evidence; latest canonical experiment |
 | [`.github/workflows/`](.github/workflows/) | Actions-only measured batches, audits, and evidence analyses |
 
 Use each experiment's declared workflow/execution wrapper when reproducing it. Calling historical Python entrypoints directly can bypass the canonical numerical contract.
