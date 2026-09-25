@@ -50,7 +50,7 @@ jobs:
           python -m pip install -r experiments/measured/requirements.txt
           curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
           tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
-          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" ;
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Compile and test GDM65 operation-only structured relation contracts
         run: |
@@ -125,7 +125,7 @@ jobs:
           python -m pip install -r experiments/measured/requirements.txt
           curl -fL --retry 3 https://github.com/apollographql/rover/releases/download/v0.41.0/rover-v0.41.0-x86_64-unknown-linux-gnu.tar.gz -o /tmp/rover.tar.gz
           tar -xzf /tmp/rover.tar.gz -C /tmp/rover-install
-          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" ;
+          find /tmp/rover-install -type f -name rover -exec install -m 755 '{}' "$HOME/.local/bin/rover" \;
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           python -m pip freeze > artifacts/packages.txt
       - name: Train structured relation ambiguity heads and execute operations
